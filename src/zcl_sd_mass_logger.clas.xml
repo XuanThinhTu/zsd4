@@ -1,0 +1,72 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <VSEOCLASS>
+    <CLSNAME>ZCL_SD_MASS_LOGGER</CLSNAME>
+    <LANGU>E</LANGU>
+    <DESCRIPT>Mass Upload – Error Logger</DESCRIPT>
+    <STATE>1</STATE>
+    <CLSCCINCL>X</CLSCCINCL>
+    <FIXPT>X</FIXPT>
+    <UNICODE>X</UNICODE>
+   </VSEOCLASS>
+   <DESCRIPTIONS>
+    <SEOCOMPOTX>
+     <CMPNAME>LOG_EXECUTION_STEP</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method to Log Execution Step</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>SAVE_ERRORS_TO_DB</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method to Save Errors To DB</DESCRIPT>
+    </SEOCOMPOTX>
+   </DESCRIPTIONS>
+   <DESCRIPTIONS_SUB>
+    <SEOSUBCOTX>
+     <CMPNAME>LOG_EXECUTION_STEP</CMPNAME>
+     <SCONAME>IV_MESSAGE</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Message Text</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>LOG_EXECUTION_STEP</CMPNAME>
+     <SCONAME>IV_REQ_ID</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>30 Characters</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>LOG_EXECUTION_STEP</CMPNAME>
+     <SCONAME>IV_STATUS</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Char 15</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>LOG_EXECUTION_STEP</CMPNAME>
+     <SCONAME>IV_TEMP_ID</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Character Field with Length 10</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>LOG_EXECUTION_STEP</CMPNAME>
+     <SCONAME>IV_VBELN_DLV</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Delivery</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>LOG_EXECUTION_STEP</CMPNAME>
+     <SCONAME>IV_VBELN_SO</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Sales Document</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>SAVE_ERRORS_TO_DB</CMPNAME>
+     <SCONAME>IT_ERRORS</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Valiation Table Type Of Error Log</DESCRIPT>
+    </SEOSUBCOTX>
+   </DESCRIPTIONS_SUB>
+  </asx:values>
+ </asx:abap>
+</abapGit>

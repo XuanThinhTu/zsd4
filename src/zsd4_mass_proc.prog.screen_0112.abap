@@ -1,0 +1,5 @@
+PROCESS BEFORE OUTPUT.
+  MODULE pbo_subscreen_0112. " <<< THÊM MODULE NÀY
+*
+PROCESS AFTER INPUT.
+  MODULE pai_subscreen_0112. " <<< THÊM MODULE NÀY

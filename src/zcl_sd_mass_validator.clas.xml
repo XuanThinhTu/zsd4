@@ -1,0 +1,125 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_CLAS" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <VSEOCLASS>
+    <CLSNAME>ZCL_SD_MASS_VALIDATOR</CLSNAME>
+    <LANGU>E</LANGU>
+    <DESCRIPT>Mass Upload SO – Validation Engine</DESCRIPT>
+    <STATE>1</STATE>
+    <CLSCCINCL>X</CLSCCINCL>
+    <FIXPT>X</FIXPT>
+    <UNICODE>X</UNICODE>
+   </VSEOCLASS>
+   <DESCRIPTIONS>
+    <SEOCOMPOTX>
+     <CMPNAME>ADD_ERROR</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method Add Errors</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>BUFFER_LOAD_TVAK</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method Buffer Load Validation For TVAK</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>CLEAR_ERRORS</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method Clear Errors</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>EXECUTE_VALIDATION_HDR</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method Execute Validation For Header</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>EXECUTE_VALIDATION_ITM</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method Execute Validation For Item</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>GC_MSGID</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>ID For Message Class</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>GET_ERRORS</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method Get Errors</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>GT_ERRORS</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Valiation Table Type Of Error Log</DESCRIPT>
+    </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>VALIDATE_HEADER_AUART</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method Validate Sales Order Type</DESCRIPT>
+    </SEOCOMPOTX>
+   </DESCRIPTIONS>
+   <DESCRIPTIONS_SUB>
+    <SEOSUBCOTX>
+     <CMPNAME>ADD_ERROR</CMPNAME>
+     <SCONAME>IV_FIELDNAME</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Field Name</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>ADD_ERROR</CMPNAME>
+     <SCONAME>IV_ITEM_NO</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Sales Document Item</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>ADD_ERROR</CMPNAME>
+     <SCONAME>IV_MESSAGE</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Message Text</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>ADD_ERROR</CMPNAME>
+     <SCONAME>IV_MSG_TYPE</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Message Type</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>ADD_ERROR</CMPNAME>
+     <SCONAME>IV_TEMP_ID</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Character Field with Length 10</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>EXECUTE_VALIDATION_HDR</CMPNAME>
+     <SCONAME>CS_HEADER</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Staging Header Table For Mass Upload</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>EXECUTE_VALIDATION_ITM</CMPNAME>
+     <SCONAME>CS_ITEM</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Staging Item Table For Mass Upload</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>EXECUTE_VALIDATION_ITM</CMPNAME>
+     <SCONAME>IS_HEADER</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Staging Header Table For Mass Upload</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>GET_ERRORS</CMPNAME>
+     <SCONAME>RT_ERRORS</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Valiation Table Type Of Error Log</DESCRIPT>
+    </SEOSUBCOTX>
+    <SEOSUBCOTX>
+     <CMPNAME>VALIDATE_HEADER_AUART</CMPNAME>
+     <SCONAME>CS_HEADER</SCONAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Staging Header Table For Mass Upload</DESCRIPT>
+    </SEOSUBCOTX>
+   </DESCRIPTIONS_SUB>
+  </asx:values>
+ </asx:abap>
+</abapGit>

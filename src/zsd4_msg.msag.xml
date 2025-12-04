@@ -1,0 +1,542 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_MSAG" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <T100A>
+    <ARBGB>ZSD4_MSG</ARBGB>
+    <MASTERLANG>E</MASTERLANG>
+    <STEXT>Message Class For SD</STEXT>
+   </T100A>
+   <T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>000</MSGNR>
+     <TEXT>Sales order type is required.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>001</MSGNR>
+     <TEXT>Sales order type &amp;1 does not exist.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>002</MSGNR>
+     <TEXT>Sales order type &amp;1 is not an Order category (VBTYP=C).</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>003</MSGNR>
+     <TEXT>Sales order type &amp;1 is blocked/deleted in Customizing.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>004</MSGNR>
+     <TEXT>No number range assigned to sales order type &amp;1.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>005</MSGNR>
+     <TEXT>Validated OK.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>006</MSGNR>
+     <TEXT>Sales Organization is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>007</MSGNR>
+     <TEXT>Sales Organization &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>008</MSGNR>
+     <TEXT>Distribution Channel is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>009</MSGNR>
+     <TEXT>Distribution Channel &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>010</MSGNR>
+     <TEXT>Division is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>011</MSGNR>
+     <TEXT>Division &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>012</MSGNR>
+     <TEXT>Sales Area incomplete (missing Org/Channel/Division)</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>013</MSGNR>
+     <TEXT>Sales Area &amp;1/&amp;2/&amp;3 does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>014</MSGNR>
+     <TEXT>Sales Office &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>015</MSGNR>
+     <TEXT>Sales Group &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>016</MSGNR>
+     <TEXT>Sold-to Party is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>017</MSGNR>
+     <TEXT>Customer &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>018</MSGNR>
+     <TEXT>Customer &amp;1 not assigned to Sales Area &amp;2/&amp;3/&amp;4</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>019</MSGNR>
+     <TEXT>Customer &amp; is blocked for order processing</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>020</MSGNR>
+     <TEXT>Customer &amp;1 is order-blocked in Sales Area &amp;2/&amp;3/&amp;4</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>021</MSGNR>
+     <TEXT>Customer Reference is required for order type &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>022</MSGNR>
+     <TEXT>Customer Reference must not exceed 35 characters</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>023</MSGNR>
+     <TEXT>Customer Reference already exists for Sold-to &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>024</MSGNR>
+     <TEXT>Customer Reference contains invalid characters</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>025</MSGNR>
+     <TEXT>Requested delivery date is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>026</MSGNR>
+     <TEXT>Invalid date format (expected dd/mm/yyyy)</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>027</MSGNR>
+     <TEXT>Requested delivery date is invalid</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>028</MSGNR>
+     <TEXT>Requested delivery date &amp; is in the past</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>029</MSGNR>
+     <TEXT>Price date is required.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>030</MSGNR>
+     <TEXT>Invalid date format (expected dd/mm/yyyy)</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>031</MSGNR>
+     <TEXT>Price date is invalid.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>032</MSGNR>
+     <TEXT>Price date is after requested delivery date.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>033</MSGNR>
+     <TEXT>Payment terms is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>034</MSGNR>
+     <TEXT>Payment terms &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>035</MSGNR>
+     <TEXT>Payment terms &amp; has payment block</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>036</MSGNR>
+     <TEXT>Payment terms &amp; is valid</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>037</MSGNR>
+     <TEXT>Incoterms (Part 1) is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>038</MSGNR>
+     <TEXT>Incoterms code &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>039</MSGNR>
+     <TEXT>Incoterms code &amp; entered but location missing</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>040</MSGNR>
+     <TEXT>Incoterms &amp;1/&amp;2 is valid</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>041</MSGNR>
+     <TEXT>Currency is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>042</MSGNR>
+     <TEXT>Currency &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>043</MSGNR>
+     <TEXT>Currency &amp; is invalid</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>044</MSGNR>
+     <TEXT>Order Date is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>045</MSGNR>
+     <TEXT>Invalid Order Date format (expected dd/mm/yyyy)</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>046</MSGNR>
+     <TEXT>Order Date is invalid</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>047</MSGNR>
+     <TEXT>Order Date &amp; is in the future</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>048</MSGNR>
+     <TEXT>Pricing Procedure is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>049</MSGNR>
+     <TEXT>Pricing Procedure &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>050</MSGNR>
+     <TEXT>Pricing Procedure &amp; is valid</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>051</MSGNR>
+     <TEXT>Material is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>052</MSGNR>
+     <TEXT>Material &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>053</MSGNR>
+     <TEXT>Material &amp; is flagged for deletion</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>054</MSGNR>
+     <TEXT>Material &amp;1 not assigned to Sales Org &amp;2/&amp;3</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>055</MSGNR>
+     <TEXT>Material &amp;1 is deleted in Sales Area &amp;2/&amp;3.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>056</MSGNR>
+     <TEXT>Material &amp; is valid</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>057</MSGNR>
+     <TEXT>Plant is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>058</MSGNR>
+     <TEXT>Plant &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>059</MSGNR>
+     <TEXT>Shipping Point is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>060</MSGNR>
+     <TEXT>Shipping Point &amp; does not exist</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>061</MSGNR>
+     <TEXT>Storage Location is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>062</MSGNR>
+     <TEXT>Storage Location &amp;1 does not exist in Plant &amp;2</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>063</MSGNR>
+     <TEXT>Order quantity is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>064</MSGNR>
+     <TEXT>Invalid quantity &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>065</MSGNR>
+     <TEXT>Quantity must be greater than 0</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>066</MSGNR>
+     <TEXT>Unit Price is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>067</MSGNR>
+     <TEXT>Invalid Unit Price &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>068</MSGNR>
+     <TEXT>Unit Price must be greater than 0</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>069</MSGNR>
+     <TEXT>Condition Type &amp; requires a Unit Price</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>070</MSGNR>
+     <TEXT>Invalid Per value &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>071</MSGNR>
+     <TEXT>Per value must be greater than 0</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>072</MSGNR>
+     <TEXT>Unit of Measure is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>073</MSGNR>
+     <TEXT>Unit &amp;1 not valid for Material &amp;2</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>074</MSGNR>
+     <TEXT>Schedule line date is required</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>075</MSGNR>
+     <TEXT>Invalid date format (expected dd/mm/yyyy)</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>076</MSGNR>
+     <TEXT>Invalid date format (expected dd/mm/yyyy)</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>077</MSGNR>
+     <TEXT>Schedule line date is in the past</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>078</MSGNR>
+     <TEXT>Schedule line date earlier than requested delivery date</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>079</MSGNR>
+     <TEXT>Required field &amp; is missing</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>080</MSGNR>
+     <TEXT>Invalid Sales Org &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>081</MSGNR>
+     <TEXT>Invalid Distr. Channel &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>082</MSGNR>
+     <TEXT>Invalid Division &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>083</MSGNR>
+     <TEXT>Cannot determine Pricing Procedure (Header error).</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>084</MSGNR>
+     <TEXT>Cannot determine Doc. Pricing Proc. for Order Type &amp;.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>085</MSGNR>
+     <TEXT>Cannot determine Cust. Pricing Proc. for Customer &amp;.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>086</MSGNR>
+     <TEXT>No Pricing Procedure determined for this combination.</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>087</MSGNR>
+     <TEXT>Customer &amp; is flagged for deletion.</TEXT>
+    </T100>
+   </T100>
+  </asx:values>
+ </asx:abap>
+</abapGit>
