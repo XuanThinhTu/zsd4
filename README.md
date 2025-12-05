@@ -83,7 +83,7 @@ Dự án này được quản lý bằng **abapGit**.
 
 ## 🤝 Contributing
 
-* **Developer:** [Tên của bạn]
+* **Group:** FA25SAP09 
 * **Module:** SAP SD
 * **Last Update:** December 2025
 
