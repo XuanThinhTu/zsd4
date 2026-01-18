@@ -71,6 +71,11 @@ CLASS lcl_event_handler IMPLEMENTATION.
     IF gs_edit <> 'X'.
       RETURN.
     ENDIF.
+
+    " 1. Kiểm tra xem Grid nào đang gọi?
+    " CHỈ thêm nút Add/Delete nếu là màn hình Single Entry Item
+    IF mo_grid = go_grid_item_single.
+
     CLEAR ls_button.
     ls_button-function   = '&DEL'.
     ls_button-icon       = icon_delete_row.
@@ -86,211 +91,383 @@ CLASS lcl_event_handler IMPLEMENTATION.
     ls_button-text       = 'Add'.
     ls_button-butn_type  = '0'.
     APPEND ls_button TO e_object->mt_toolbar.
+
+    ENDIF.
+
+    " (Các Grid khác như Mass Upload Validated/Failed sẽ không chạy vào IF này
+    "  -> Không có nút Add/Del tự tạo -> Đúng ý bạn)
   ENDMETHOD.
 
-*METHOD handle_data_changed.
-*
-*    DATA: ls_mod_cell TYPE lvc_s_modi,
-*          lv_qty_temp TYPE kwmeng.
-*
-*    FIELD-SYMBOLS: <ls_item> TYPE ty_item_details,
-*                   <lv_field_data> TYPE any.
-*
-*    " 1. Duyệt qua các ô vừa nhập
-*    LOOP AT er_data_changed->mt_good_cells INTO ls_mod_cell.
-*
-*      CASE ls_mod_cell-fieldname.
-*        WHEN 'TARGET_QTY' OR 'KWMENG' OR 'MENGE' OR 'ZMENG'.
-*
-*          READ TABLE gt_item_details ASSIGNING <ls_item> INDEX ls_mod_cell-row_id.
-*          IF sy-subrc = 0.
-*            " Ép kiểu và Gán giá trị
-*            lv_qty_temp = ls_mod_cell-value.
-*            ASSIGN COMPONENT ls_mod_cell-fieldname OF STRUCTURE <ls_item> TO <lv_field_data>.
-*            IF sy-subrc = 0.
-*              <lv_field_data> = lv_qty_temp.
-*            ENDIF.
-*
-*            " Logic đổi màu
-*            IF lv_qty_temp > 0.
-*               <ls_item>-icon        = icon_led_green.
-*               <ls_item>-status_text = 'OK'.
-*               <ls_item>-message     = space.
-*            ELSE.
-*               <ls_item>-icon        = icon_led_red.
-*               <ls_item>-status_text = 'Input Qty'.
-*            ENDIF.
-*          ENDIF.
-*
-*      ENDCASE.
-*    ENDLOOP.
-*
-*    " 2. Tính toán lại giá (Simulate)
-*    " [SỬA TẠI ĐÂY]: Xóa 'USING er_data_changed' vì FORM không cần tham số này nữa
-*    PERFORM perform_single_item_simulate.
-*
-*    " 3. Vẽ lại màn hình
-*    IF go_grid_item_single IS NOT INITIAL.
-*      CALL METHOD go_grid_item_single->refresh_table_display
-*        EXPORTING
-*          is_stable = VALUE #( row = 'X' col = 'X' ).
-*    ENDIF.
-*
-*  ENDMETHOD.
+"chú ý 2
 METHOD handle_data_changed.
-  DATA: ls_mod_cell TYPE lvc_s_modi,
-        lv_qty      TYPE kwmeng.
 
-  FIELD-SYMBOLS: <ls_cond> TYPE ty_cond_alv,      " Structure ALV Condition
-                 <ls_item> TYPE ty_item_details.  " Structure Item Detail
+  " ===========================================================
+  " 1. KHAI BÁO BIẾN (DÙNG CHUNG CHO TOÀN BỘ METHOD)
+  " ===========================================================
+  DATA: ls_mod_cell  TYPE lvc_s_modi,
+        lv_qty       TYPE zquantity,
+        lv_price     TYPE kbetr,       " Giá ZPRQ
 
+        " Biến dùng chung cho các Case
+        lv_tax_pct   TYPE kbetr,
+        lv_net_val   TYPE kwert,
+
+        " Biến cho ZDR/ZCRR
+        lv_zdrp_pct  TYPE kbetr,
+        lv_z100_pct  TYPE kbetr,
+        lv_order_val TYPE kwert,
+        lv_z100_val  TYPE kwert,
+
+        " Biến cho ZSC
+        lv_zcf1_pct  TYPE kbetr,
+        lv_zcf1_val  TYPE kwert,
+        lv_net1_val  TYPE kwert,
+        lv_net2_val  TYPE kwert,
+        lv_tax_val   TYPE kwert,
+        lv_base_val  TYPE kwert,
+
+        " Structure dùng để Read Table (Khai báo ở đây để tránh lỗi Inline Declaration)
+        ls_zprq      TYPE ty_cond_alv,
+        ls_ztax      TYPE ty_cond_alv,
+        ls_zdrp      TYPE ty_cond_alv,
+        ls_zcrp     TYPE ty_cond_alv,
+        ls_zc       TYPE ty_cond_alv,
+        ls_z100      TYPE ty_cond_alv,
+        ls_zcf1      TYPE ty_cond_alv.
+
+  " Cache variables
+  DATA: ls_cache     TYPE ty_cond_cache.
+
+  FIELD-SYMBOLS: <fs_item>   TYPE ty_item_details,
+                 <fs_cond>   TYPE ty_cond_alv,
+                 <fs_detail> TYPE ty_item_details.
+
+  " -----------------------------------------------------------
+  " 2. LẤY SỐ LƯỢNG (QUANTITY)
+  " -----------------------------------------------------------
+  READ TABLE gt_item_details ASSIGNING <fs_item> INDEX gv_current_item_idx.
+  IF sy-subrc = 0.
+    lv_qty = <fs_item>-quantity.
+  ELSE.
+    lv_qty = 1.
+  ENDIF.
+  IF lv_qty <= 0. lv_qty = 1. ENDIF.
+
+  " -----------------------------------------------------------
+  " 3. UPDATE AMOUNT MỚI VÀO BẢNG TỪ NGƯỜI DÙNG NHẬP
+  " -----------------------------------------------------------
   LOOP AT er_data_changed->mt_good_cells INTO ls_mod_cell.
-    CASE ls_mod_cell-fieldname.
-
-      " --- XỬ LÝ KHI NHẬP AMOUNT (KBETR) ---
-      " Kiểm tra fieldcat xem tên trường là 'KBETR' hay 'AMOUNT' để sửa lại cho khớp
-      WHEN 'KBETR' OR 'AMOUNT'.
-
-        " 1. Cập nhật giá trị vào bảng nội bộ
-        " Lưu ý: Cần đảm bảo gt_conditions_alv là biến global chứa dữ liệu đang hiển thị
-        READ TABLE gt_conditions_alv ASSIGNING <ls_cond> INDEX ls_mod_cell-row_id.
-
-        IF sy-subrc = 0.
-           " Cập nhật Amount mới từ ô vừa nhập
-           <ls_cond>-amount = ls_mod_cell-value.
-
-           " A. Lấy số lượng của Item hiện tại để tính toán
-           " Biến gv_current_item_idx phải là index của item đang được chọn bên ngoài
-           READ TABLE gt_item_details ASSIGNING <ls_item> INDEX gv_current_item_idx.
-           IF sy-subrc = 0.
-              lv_qty = <ls_item>-quantity.
-           ELSE.
-              lv_qty = 1.  " Default nếu ko tìm thấy
-           ENDIF.
-
-           " B. Tính toán Condition Value (KWERT) = Đơn giá * Số lượng
-           <ls_cond>-cond_value = <ls_cond>-amount * lv_qty.
-
-           " --- LOGIC QUAN TRỌNG: ĐỔI MÀU ĐÈN ---
-           " Chỉ cần có Amount khác 0 là chuyển Xanh
-           IF <ls_cond>-amount IS NOT INITIAL.
-              <ls_cond>-icon        = icon_led_green.  " Đèn Xanh
-              <ls_cond>-status_text = 'OK'.
-
-              " Tự động điền Currency nếu thiếu (Logic giống VA01)
-              IF <ls_cond>-waers IS INITIAL.
-                <ls_cond>-waers = 'VND'.
-              ENDIF.
-
-              " Tự động điền Condition Type mặc định nếu thiếu
-              IF <ls_cond>-kschl IS INITIAL.
-                <ls_cond>-kschl = 'PR00'.
-              ENDIF.
-           ELSE.
-              " Nếu xóa Amount -> Về lại màu đỏ (hoặc xám tùy logic)
-              <ls_cond>-icon = icon_led_red.
-              <ls_cond>-cond_value = 0.
-           ENDIF.
-
-           " C. Refresh lại màn hình ngay lập tức để user thấy đèn xanh và số tiền nhảy
-           IF go_grid_conditions IS BOUND.
-             CALL METHOD go_grid_conditions->refresh_table_display
-                EXPORTING is_stable = VALUE #( row = 'X' col = 'X' ).
-           ENDIF.
-        ENDIF.
-
-    ENDCASE.
+    READ TABLE gt_conditions_alv ASSIGNING FIELD-SYMBOL(<fs_upd>) INDEX ls_mod_cell-row_id.
+    IF sy-subrc = 0.
+      " Chỉ update nếu sửa cột Amount
+      IF ls_mod_cell-fieldname = 'AMOUNT'.
+         <fs_upd>-amount = ls_mod_cell-value.
+      ENDIF.
+    ENDIF.
   ENDLOOP.
-ENDMETHOD.
-*  METHOD handle_data_changed.
-*    DATA: ls_mod_cell TYPE lvc_s_modi.
-*
-*    DATA: lv_qty      TYPE kwmeng.
-*
-*    FIELD-SYMBOLS: <ls_cond> TYPE ty_cond_alv, " Structure ALV Condition của bạn
-*                   <ls_item> TYPE ty_item_details.
-*
-*    " Duyệt qua các ô vừa thay đổi
-*    LOOP AT er_data_changed->mt_good_cells INTO ls_mod_cell.
-*
-*      " =========================================================
-*      " CASE 1: SINGLE ENTRY (Logic Mô phỏng giá, đổi màu đèn)
-*      " =========================================================
-*      IF mo_grid = go_grid_item_single OR mo_grid = go_grid_conditions.
-*         " (Giữ nguyên logic cũ của bạn: Tính toán Cond Value, đổi màu đèn...)
-*         " ... [Paste lại code cũ của bạn vào đây] ...
-*        CASE ls_mod_cell-fieldname.
-*
-*      " --- XỬ LÝ KHI NHẬP AMOUNT (KBETR) ---
-*      WHEN 'KBETR' OR 'AMOUNT'. " (Check tên trường trong Fieldcat của bạn)
-*
-*        " 1. Cập nhật giá trị vào bảng nội bộ
-*        READ TABLE gt_conditions_alv ASSIGNING <ls_cond> INDEX ls_mod_cell-row_id.
-*        IF sy-subrc = 0.
-*           <ls_cond>-amount = ls_mod_cell-value. " Cập nhật Amount mới
-*
-*           " --- LOGIC GIỐNG VA01: TÍNH TOÁN CONDITION VALUE ---
-*           " Công thức: Cond Value = Amount * Quantity (Của Item đang chọn)
-*
-*           " A. Lấy số lượng của Item hiện tại
-*           READ TABLE gt_item_details ASSIGNING <ls_item> INDEX gv_current_item_idx.
-*           IF sy-subrc = 0.
-*              lv_qty = <ls_item>-quantity.
-*           ELSE.
-*              lv_qty = 1. " Default nếu ko tìm thấy
-*           ENDIF.
-*
-*           " B. Tính toán Condition Value (KWERT)
-*           <ls_cond>-cond_value = <ls_cond>-amount * lv_qty.
-*
-*           " --- LOGIC GIỐNG VA01: ĐỔI MÀU ĐÈN ---
-*           " Chỉ cần có Amount là Xanh
-*           IF <ls_cond>-amount IS NOT INITIAL.
-*              <ls_cond>-icon        = icon_led_green. " Đèn Xanh
-*              <ls_cond>-status_text = 'OK'.
-*
-*              " Tự điền Currency nếu thiếu (như VA01)
-*              IF <ls_cond>-waers IS INITIAL. <ls_cond>-waers = 'VND'. ENDIF.
-*              " Tự điền Cond Type nếu thiếu
-*              IF <ls_cond>-kschl IS INITIAL. <ls_cond>-kschl = 'PR00'. ENDIF.
-*           ELSE.
-*              " Xóa Amount -> Về lại màu xám hoặc đỏ
-*              <ls_cond>-icon = icon_led_red.
-*              <ls_cond>-cond_value = 0.
-*           ENDIF.
-*
-*           " C. [QUAN TRỌNG] Đẩy giá trị Cond Value mới tính ra màn hình ngay lập tức
-*           " (Nếu không có đoạn này, người dùng phải Refresh mới thấy số nhảy)
-*           CALL METHOD go_grid_conditions->refresh_table_display
-*              EXPORTING is_stable = VALUE #( row = 'X' col = 'X' ).
-*
-*        ENDIF.
-*
-*    ENDCASE.
-*      ENDIF.
-*
-*      " =========================================================
-*      " CASE 2: MASS UPLOAD (Validated & Failed) - Logic Sửa Lỗi
-*      " =========================================================
-*      IF mo_grid = go_grid_hdr_val  OR mo_grid = go_grid_hdr_fail OR
-*         mo_grid = go_grid_itm_val  OR mo_grid = go_grid_itm_fail OR
-*         mo_grid = go_grid_cnd_val  OR mo_grid = go_grid_cnd_fail.
-*
-*         " Nhiệm vụ: Chỉ cần đảm bảo dữ liệu được đẩy vào bảng nội bộ
-*         " (Việc này ALV tự làm khá tốt, nhưng ta có thể thêm logic validate sơ bộ ở đây nếu muốn)
-*         " Hiện tại: Để trống, chờ sự kiện Finished để xử lý sau.
-*      ENDIF.
-*
-*    ENDLOOP.
-*
-*    " Refresh nếu cần (Thường không cần refresh ở bước này cho Mass Upload)
-*  ENDMETHOD.
 
+  " ===========================================================
+  " 4. TÍNH TOÁN THEO LOẠI ĐƠN HÀNG (CORE LOGIC)
+  " ===========================================================
+
+  " >>>>>>>>>>>>>>> CASE 1: ZORR & ZTP (Standard) <<<<<<<<<<<<<<<
+  IF gv_order_type = 'ZORR' OR gv_order_type = 'ZTP'.
+
+    " A. Lấy tham số đầu vào
+    READ TABLE gt_conditions_alv INTO ls_zprq WITH KEY kschl = 'ZPRQ'.
+    IF sy-subrc = 0. lv_price = ls_zprq-amount. ENDIF.
+
+    READ TABLE gt_conditions_alv INTO ls_ztax WITH KEY kschl = 'ZTAX'.
+    IF sy-subrc = 0. lv_tax_pct = ls_ztax-amount. ENDIF.
+
+    " B. Loop tính toán
+    LOOP AT gt_conditions_alv ASSIGNING <fs_cond>.
+      CASE <fs_cond>-kschl.
+        WHEN 'ZPRQ'.
+          <fs_cond>-kwert = lv_price * lv_qty.
+          lv_net_val      = <fs_cond>-kwert. " Lưu base
+          <fs_cond>-icon  = icon_green_light.
+
+        WHEN 'NETW'.
+          <fs_cond>-amount = lv_price.
+          <fs_cond>-kwert  = lv_net_val.
+          <fs_cond>-waers  = ls_zprq-waers.
+
+        WHEN 'ZTAX'.
+          <fs_cond>-kwert = ( lv_net_val * lv_tax_pct ) / 100.
+          <fs_cond>-waers = ls_zprq-waers.
+
+        WHEN 'GROS'.
+          <fs_cond>-amount = lv_price + ( ( lv_price * lv_tax_pct ) / 100 ).
+          <fs_cond>-kwert  = <fs_cond>-amount * lv_qty.
+          <fs_cond>-waers  = ls_zprq-waers.
+      ENDCASE.
+    ENDLOOP.
+
+  " >>>>>>>>>>>>>>> CASE 2: ZDR & ZCRR (Debit/Credit Memo) <<<<<<<<<<<<<<<
+  ELSEIF gv_order_type = 'ZDR'.
+
+    " A. Lấy tham số đầu vào
+    READ TABLE gt_conditions_alv INTO ls_zprq WITH KEY kschl = 'ZPRQ'.
+    IF sy-subrc = 0. lv_price = ls_zprq-amount. ENDIF.
+
+    READ TABLE gt_conditions_alv INTO ls_zdrp WITH KEY kschl = 'ZDRP'.
+    IF sy-subrc = 0. lv_zdrp_pct = ls_zdrp-amount. ENDIF.
+
+    READ TABLE gt_conditions_alv INTO ls_z100 WITH KEY kschl = 'Z100'.
+    IF sy-subrc = 0.
+       lv_z100_pct = ls_z100-amount.
+    ELSE.
+       lv_z100_pct = -100. " Mặc định -100 nếu chưa có
+    ENDIF.
+
+    " B. Loop tính toán
+    LOOP AT gt_conditions_alv ASSIGNING <fs_cond>.
+      CASE <fs_cond>-kschl.
+        " 1. ZPRQ
+        WHEN 'ZPRQ'.
+          <fs_cond>-kwert = lv_price * lv_qty.
+          lv_order_val    = <fs_cond>-kwert.
+          <fs_cond>-icon  = icon_green_light.
+
+        " 2. ZDRP (% Debit)
+        WHEN 'ZDRP'.
+          <fs_cond>-kwert = ( lv_order_val * lv_zdrp_pct ) / 100.
+          <fs_cond>-waers = ls_zprq-waers.
+
+        " 3. Z100 (-100%)
+        WHEN 'Z100'.
+          <fs_cond>-kwert = ( lv_order_val * lv_z100_pct ) / 100.
+          lv_z100_val     = <fs_cond>-kwert.
+          <fs_cond>-waers = ls_zprq-waers.
+
+        " 4. NETW (Net Values)
+        WHEN 'NETW'.
+          <fs_cond>-kwert = lv_order_val +
+                            ( ( lv_order_val * lv_zdrp_pct ) / 100 ) +
+                            lv_z100_val.
+
+          " Tính lại cột Amount (Đơn giá ròng)
+          IF lv_qty <> 0.
+             <fs_cond>-amount = <fs_cond>-kwert / lv_qty.
+          ELSE.
+             <fs_cond>-amount = 0.
+          ENDIF.
+          <fs_cond>-waers = ls_zprq-waers.
+      ENDCASE.
+
+      " Xử lý riêng cho dòng Order Value (không có KSCHL hoặc là text)
+      IF <fs_cond>-vtext = 'Order Value'.
+         <fs_cond>-amount = lv_price.
+         <fs_cond>-kwert  = lv_order_val.
+         <fs_cond>-waers  = ls_zprq-waers.
+      ENDIF.
+    ENDLOOP.
+
+  " >>>>>>>>>>>>>>> CASE 3: ZCRR (Credit Memo) <<<<<<<<<<<<<<<
+  " >>>>>>>>>>>>>>> CASE 3: ZCRR (Credit Memo) <<<<<<<<<<<<<<<
+  ELSEIF gv_order_type = 'ZCRR'.
+
+    READ TABLE gt_conditions_alv INTO ls_zprq WITH KEY kschl = 'ZPRQ'.
+    IF sy-subrc = 0. lv_price = ls_zprq-amount. ENDIF.
+
+    DATA: lv_zcrp_pct TYPE kbetr.
+    READ TABLE gt_conditions_alv INTO ls_zcrp WITH KEY kschl = 'ZCRP'.
+    IF sy-subrc = 0. lv_zcrp_pct = ls_zcrp-amount. ENDIF.
+
+    " --- TÍNH TOÁN VỚI DẤU ÂM ---
+    DATA: v_base_val TYPE kwert, v_zcrp_val TYPE kwert,
+          v_net1_val TYPE kwert, v_z100_val TYPE kwert, v_net2_val TYPE kwert.
+
+    " 1. Base luôn là số âm (Credit)
+    v_base_val = ( lv_price * lv_qty ) * -1.      " VD: -40.000
+
+    " 2. ZCRP tính trên Base âm
+    v_zcrp_val = ( v_base_val * lv_zcrp_pct ) / 100. " VD: -8.000
+
+    " 3. Net 1 = Base + ZCRP
+    v_net1_val = v_base_val + v_zcrp_val.         " VD: -48.000
+
+    " 4. Z100 = -100% Base (Sẽ ra số Dương)
+    v_z100_val = ( v_base_val * -100 ) / 100.     " VD: 40.000
+
+    " 5. Net 2 = Net 1 + Z100
+    v_net2_val = v_net1_val + v_z100_val.         " VD: -8.000
+
+    " C. Update ALV
+    LOOP AT gt_conditions_alv ASSIGNING <fs_cond>.
+      CASE <fs_cond>-kschl.
+        WHEN 'ZPRQ'.
+          <fs_cond>-kwert = v_base_val.
+          <fs_cond>-icon  = icon_green_light.
+
+        WHEN 'NETW'.
+          <fs_cond>-amount = lv_price.
+          <fs_cond>-kwert  = v_base_val.
+
+        WHEN 'ZCRP'.
+          <fs_cond>-kwert = v_zcrp_val.
+
+        WHEN 'NET1'.
+          <fs_cond>-kwert = v_net1_val.
+          IF lv_qty <> 0. <fs_cond>-amount = abs( v_net1_val / lv_qty ). ENDIF.
+
+        WHEN 'Z100'.
+          <fs_cond>-kwert = v_z100_val.
+
+        WHEN 'NET2'.
+          <fs_cond>-kwert = v_net2_val.
+          IF lv_qty <> 0. <fs_cond>-amount = abs( v_net2_val / lv_qty ). ENDIF.
+      ENDCASE.
+    ENDLOOP.
+
+  " >>>>>>>>>>>>>>> CASE 3: ZRET (Returns) <<<<<<<<<<<<<<<
+  ELSEIF gv_order_type = 'ZRET'.
+
+    " A. Lấy giá ZPRQ
+    READ TABLE gt_conditions_alv INTO ls_zprq WITH KEY kschl = 'ZPRQ'.
+    IF sy-subrc = 0. lv_price = ls_zprq-amount. ENDIF.
+
+    " B. Tính toán
+    LOOP AT gt_conditions_alv ASSIGNING <fs_cond>.
+      CASE <fs_cond>-kschl.
+        WHEN 'ZPRQ'.
+          <fs_cond>-kwert = lv_price * lv_qty.
+          lv_net_val      = <fs_cond>-kwert.
+          <fs_cond>-icon  = icon_green_light.
+
+        WHEN 'NETW'.
+          <fs_cond>-kwert  = lv_net_val.
+          <fs_cond>-amount = lv_price.
+          <fs_cond>-waers  = ls_zprq-waers.
+      ENDCASE.
+    ENDLOOP.
+
+  " >>>>>>>>>>>>>>> CASE 4: ZSC (Service/Commission) <<<<<<<<<<<<<<<
+  ELSEIF gv_order_type = 'ZSC'.
+
+    " A. Lấy Input
+    READ TABLE gt_conditions_alv INTO ls_zprq WITH KEY kschl = 'ZPRQ'.
+    IF sy-subrc = 0. lv_price = ls_zprq-amount. ENDIF.
+
+    READ TABLE gt_conditions_alv INTO ls_zcf1 WITH KEY kschl = 'ZCF1'.
+    IF sy-subrc = 0. lv_zcf1_pct = ls_zcf1-amount. ENDIF.
+
+    READ TABLE gt_conditions_alv INTO ls_ztax WITH KEY kschl = 'ZTAX'.
+    IF sy-subrc = 0. lv_tax_pct = ls_ztax-amount. ENDIF.
+
+    " B. Tính toán biến trung gian
+    lv_base_val = lv_price * lv_qty.                 " Base
+    lv_zcf1_val = ( lv_base_val * lv_zcf1_pct ) / 100. " Commission Value
+    lv_net1_val = lv_base_val + lv_zcf1_val.           " Net 1
+    lv_z100_val = ( lv_base_val * -100 ) / 100.        " Z100 Value
+    lv_net2_val = lv_net1_val + lv_z100_val.           " Net 2
+    lv_tax_val  = ( lv_net2_val * lv_tax_pct ) / 100.  " Tax Value
+
+    " C. Update ALV
+    LOOP AT gt_conditions_alv ASSIGNING <fs_cond>.
+      CASE <fs_cond>-kschl.
+        WHEN 'ZPRQ'.
+           <fs_cond>-kwert = lv_base_val.
+           <fs_cond>-icon  = icon_green_light.
+
+        WHEN 'NETW'. " Net Value
+           <fs_cond>-amount = lv_price.
+           <fs_cond>-kwert  = lv_base_val.
+           <fs_cond>-waers  = ls_zprq-waers.
+
+        WHEN 'ZCF1'.
+           <fs_cond>-kwert = lv_zcf1_val.
+
+        WHEN 'NET1'. " Net Value 1
+           <fs_cond>-kwert = lv_net1_val.
+           IF lv_qty <> 0. <fs_cond>-amount = lv_net1_val / lv_qty. ENDIF.
+           <fs_cond>-waers = ls_zprq-waers.
+
+        WHEN 'Z100'.
+           <fs_cond>-kwert = lv_z100_val.
+
+        WHEN 'NET2'. " Net Value 2
+           <fs_cond>-kwert = lv_net2_val.
+           IF lv_qty <> 0. <fs_cond>-amount = lv_net2_val / lv_qty. ENDIF.
+           <fs_cond>-waers = ls_zprq-waers.
+
+        WHEN 'ZTAX'.
+           <fs_cond>-kwert = lv_tax_val.
+
+        WHEN 'GROS'.
+           <fs_cond>-kwert = lv_net2_val + lv_tax_val.
+           IF lv_qty <> 0. <fs_cond>-amount = <fs_cond>-kwert / lv_qty. ENDIF.
+           <fs_cond>-waers = ls_zprq-waers.
+      ENDCASE.
+    ENDLOOP.
+
+   " >>> [MỚI] CASE 5: ZFOC (Free of Charge)
+  ELSEIF gv_order_type = 'ZFOC'.
+
+     " 1. Lấy giá Base (Net Value)
+     " Lưu ý: User không nhập được, nên lấy giá trị hiện tại trong bảng
+     READ TABLE gt_conditions_alv INTO DATA(ls_base) WITH KEY kschl = 'NETW'.
+     IF sy-subrc = 0. lv_price = ls_base-amount. ENDIF.
+
+     " 2. Tính toán
+     lv_base_val = lv_price * lv_qty.              " Base
+     lv_z100_val = ( lv_base_val * -100 ) / 100.   " Z100
+     lv_net1_val = lv_base_val + lv_z100_val.      " Net 1
+
+     " 3. Update ALV
+     LOOP AT gt_conditions_alv ASSIGNING <fs_cond>.
+       CASE <fs_cond>-kschl.
+         WHEN 'NETW'.
+            <fs_cond>-kwert = lv_base_val.
+
+         WHEN 'Z100'.
+            <fs_cond>-kwert = lv_z100_val.
+
+         WHEN 'NET1'.
+            <fs_cond>-kwert  = lv_net1_val.
+            IF lv_qty <> 0. <fs_cond>-amount = lv_net1_val / lv_qty. ENDIF.
+       ENDCASE.
+     ENDLOOP.
+
+  ENDIF.
+
+  " -----------------------------------------------------------
+  " 5. LƯU VÀO CACHE GLOBAL (QUAN TRỌNG)
+  " -----------------------------------------------------------
+  " Lấy Item No thực tế từ Index
+  READ TABLE gt_item_details ASSIGNING <fs_detail> INDEX gv_current_item_idx.
+  IF sy-subrc = 0.
+
+    ls_cache-item_no    = <fs_detail>-item_no.
+    ls_cache-conditions = gt_conditions_alv.
+
+    " Update Cache
+    INSERT ls_cache INTO TABLE gt_cond_cache.
+    IF sy-subrc <> 0.
+      MODIFY TABLE gt_cond_cache FROM ls_cache.
+    ENDIF.
+  ENDIF.
+
+  " -----------------------------------------------------------
+  " 6. REFRESH ALV (HARD REFRESH)
+  " -----------------------------------------------------------
+  IF go_grid_conditions IS BOUND.
+    DATA: ls_stable TYPE lvc_s_stbl.
+    ls_stable-row = 'X'.
+    ls_stable-col = 'X'.
+    go_grid_conditions->refresh_table_display( is_stable = ls_stable ).
+    cl_gui_cfw=>flush( ).
+  ENDIF.
+
+ENDMETHOD.
+
+"chú ý 2
 METHOD HANDLE_DATA_CHANGED_FINISHED.
     " Kiểm tra xem ALV nào đã gọi sự kiện này
     IF mo_grid = go_grid_item_single.
       " --- ALV Item Details (Screen 0112) đã thay đổi ---
-      PERFORM perform_single_item_simulate .
+      PERFORM perform_single_item_simulate.
 
       IF mo_grid IS BOUND.
         mo_grid->refresh_table_display( ).
@@ -338,42 +515,7 @@ METHOD HANDLE_DATA_CHANGED_FINISHED.
     ENDIF.
   ENDMETHOD.
 
-*  METHOD handle_data_changed_finished.
-*
-*    " =========================================================
-*    " CASE 1: SINGLE ENTRY (Logic Mô phỏng giá)
-*    " =========================================================
-*    IF mo_grid = go_grid_item_single.
-*      PERFORM perform_single_item_simulate IN PROGRAM zsd4_sales_order_center.
-*      mo_grid->refresh_table_display( ).
-*      " ... (Logic set title cũ) ...
-*
-*    ELSEIF mo_grid = go_grid_conditions.
-*      " ... (Logic đồng bộ condition cũ) ...
-*      PERFORM display_conditions_for_item IN PROGRAM zsd4_sales_order_center USING gv_current_item_idx.
-*
-*
-*    " =========================================================
-*    " CASE 2: MASS UPLOAD (Logic Sync & Validate) - [QUAN TRỌNG]
-*    " =========================================================
-*    ELSEIF mo_grid = go_grid_hdr_val OR mo_grid = go_grid_itm_val OR mo_grid = go_grid_cnd_val OR
-*           mo_grid = go_grid_hdr_fail OR mo_grid = go_grid_itm_fail OR mo_grid = go_grid_cnd_fail.
-*
-*      " Khi user sửa xong trên Mass Upload -> Ta cần đồng bộ xuống DB ngay
-*      " (Để nếu họ bấm nút Validate thì dữ liệu mới nhất được dùng)
-*
-*      PERFORM sync_alv_to_staging_tables IN PROGRAM zsd4_sales_order_center.
-*
-*      " (Tùy chọn: Tự động chạy Validate lại ngay khi sửa xong?
-*      "  Thường thì KHÔNG NÊN vì sẽ làm chậm màn hình. Để user bấm nút Validate thì hơn).
-*
-*      " Chỉ cần Refresh lại Grid để đảm bảo hiển thị đúng
-*      mo_grid->refresh_table_display( ).
-*
-*    ENDIF.
-*
-*  ENDMETHOD.
-
+"chú ý 2
     METHOD handle_hotspot_click.
     " 1. Khai báo biến chung
     FIELD-SYMBOLS: <lt_data> TYPE STANDARD TABLE,
@@ -410,14 +552,36 @@ METHOD HANDLE_DATA_CHANGED_FINISHED.
        RETURN. " Xử lý xong thì thoát
     ENDIF.
 
-    IF e_column_id = 'SALES_DOCUMENT' OR e_column_id = 'VBELN_SO'.
-       " (Optional) Click vào số SO -> Xem VA03
+*    IF e_column_id = 'SALES_DOCUMENT' OR e_column_id = 'VBELN_SO'.
+*       " (Optional) Click vào số SO -> Xem VA03
+*       ASSIGN COMPONENT e_column_id OF STRUCTURE <ls_row> TO <lv_val>.
+*       IF <lv_val> IS NOT INITIAL.
+*          SET PARAMETER ID 'AUN' FIELD <lv_val>.
+*          CALL TRANSACTION 'VA03' AND SKIP FIRST SCREEN.
+*       ENDIF.
+*       RETURN.
+*    ENDIF.
+
+      " =========================================================
+    " [MỚI] CASE B: EDIT SALES ORDER (TỪ MASS UPLOAD -> SINGLE)
+    " =========================================================
+    IF e_column_id = 'VBELN_SO' or e_column_id = 'SALES_DOCUMENT'. " Hoặc tên cột chứa Sales Order ID trong ALV của bạn
+
+       " A. Lấy giá trị Sales Order ID
        ASSIGN COMPONENT e_column_id OF STRUCTURE <ls_row> TO <lv_val>.
+
        IF <lv_val> IS NOT INITIAL.
-          SET PARAMETER ID 'AUN' FIELD <lv_val>.
-          CALL TRANSACTION 'VA03' AND SKIP FIRST SCREEN.
+
+          " B. Gọi Form điều hướng sang Single Upload
+          " Truyền vào: Structure dòng dữ liệu (để lấy key) và Index dòng (để refresh sau khi về)
+*          PERFORM call_single_screen_for_edit USING <ls_row>
+*                                                    es_row_no-row_id.
+
+       ELSE.
+          MESSAGE 'Sales Order Number is empty.' TYPE 'S' DISPLAY LIKE 'E'.
        ENDIF.
-       RETURN.
+
+       RETURN. " Xử lý xong thì thoát
     ENDIF.
 
       IF e_column_id = 'ERR_BTN'.
@@ -433,20 +597,26 @@ METHOD HANDLE_DATA_CHANGED_FINISHED.
       " B. Xác định Item No dựa trên GRID đang click
       " (Logic này an toàn hơn là assign component tự động)
 
-      IF mo_grid = go_grid_hdr_val OR mo_grid = go_grid_hdr_fail.
+      IF mo_grid = go_grid_hdr_val OR mo_grid = go_grid_hdr_suc OR mo_grid = go_grid_hdr_fail.
          " Nếu click ở Header -> Item No luôn là 000000
          lv_item_no = '000000'.
 
       ELSE.
          " Nếu click ở Item hoặc Condition -> Lấy Item No từ dòng dữ liệu
          ASSIGN COMPONENT 'ITEM_NO' OF STRUCTURE <ls_row> TO <lv_val>.
+*         IF <lv_val> IS ASSIGNED.
+*            " Convert sang format chuẩn (000010) để so sánh
+*             DATA: lv_in TYPE string, lv_out TYPE posnr_va.
+*             lv_in = <lv_val>.
+*             CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+*               EXPORTING input = lv_in IMPORTING output = lv_out.
+*             lv_item_no = lv_out.
+*         ENDIF.
          IF <lv_val> IS ASSIGNED.
-            " Convert sang format chuẩn (000010) để so sánh
-             DATA: lv_in TYPE string, lv_out TYPE posnr_va.
-             lv_in = <lv_val>.
-             CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-               EXPORTING input = lv_in IMPORTING output = lv_out.
-             lv_item_no = lv_out.
+            " Convert chuỗi (ví dụ '10') sang số (000010) để khớp DB
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+               EXPORTING input = <lv_val>
+               IMPORTING output = lv_item_no.
          ENDIF.
       ENDIF.
 
@@ -628,9 +798,67 @@ ENDFORM.
 *---------------------------------------------------------------------*
 * Form alv_toolbar - Define Toolbar Buttons to Exclude
 *---------------------------------------------------------------------*
-FORM alv_toolbar USING pv_grid_nm.
-  CLEAR gt_exclude.
-  PERFORM get_alv_exclude_tb_func USING gt_exclude.
+*FORM alv_toolbar USING pv_grid_nm.
+*  CLEAR gt_exclude.
+*  PERFORM get_alv_exclude_tb_func USING gt_exclude.
+*ENDFORM.
+FORM alv_toolbar USING pv_grid_nm TYPE fieldname.
+
+  " 1. Xóa sạch danh sách loại trừ cũ
+  REFRESH gt_exclude.
+
+  " 2. Định nghĩa danh sách các nút CẦN ẨN cho Mass Upload (Edit nhưng không đổi cấu trúc)
+  DATA: lt_exclude_mass TYPE ui_functions.
+
+  lt_exclude_mass = VALUE #(
+    ( cl_gui_alv_grid=>mc_fc_loc_insert_row )    " Chèn dòng
+    ( cl_gui_alv_grid=>mc_fc_loc_append_row )    " Thêm dòng cuối
+    ( cl_gui_alv_grid=>mc_fc_loc_delete_row )    " Xóa dòng
+    ( cl_gui_alv_grid=>mc_fc_loc_copy )          " Copy
+    ( cl_gui_alv_grid=>mc_fc_loc_copy_row )      " Copy dòng
+    ( cl_gui_alv_grid=>mc_fc_loc_cut )           " Cắt
+    ( cl_gui_alv_grid=>mc_fc_loc_paste )         " Dán
+    ( cl_gui_alv_grid=>mc_fc_loc_paste_new_row ) " Dán dòng mới
+    ( cl_gui_alv_grid=>mc_fc_loc_undo )          " Undo
+    ( cl_gui_alv_grid=>mc_fc_graph )             " Đồ thị (thường không cần)
+    ( cl_gui_alv_grid=>mc_fc_info )              " Info
+  ).
+
+  " 3. Phân loại Grid để ẩn nút tương ứng
+  CASE pv_grid_nm.
+
+    " =========================================================
+    " NHÓM 1: MASS UPLOAD - VALIDATED & FAILED
+    " (Cho phép sửa nội dung ô, nhưng KHÔNG cho thêm/xóa dòng)
+    " =========================================================
+    WHEN 'GO_GRID_HDR_VAL' OR 'GO_GRID_ITM_VAL' OR 'GO_GRID_CND_VAL'
+      OR 'GO_GRID_HDR_FAIL' OR 'GO_GRID_ITM_FAIL' OR 'GO_GRID_CND_FAIL'.
+
+       " Gán danh sách đã định nghĩa ở trên vào biến Global gt_exclude
+       APPEND LINES OF lt_exclude_mass TO gt_exclude.
+
+
+    " =========================================================
+    " NHÓM 2: MASS UPLOAD - SUCCESS (Read-only hoàn toàn)
+    " =========================================================
+    WHEN 'GO_GRID_HDR_SUC' OR 'GO_GRID_ITM_SUC' OR 'GO_GRID_CND_SUC'.
+
+       " Ẩn hết nút sửa + Nút Check + Nút Refresh (nếu muốn)
+       APPEND LINES OF lt_exclude_mass TO gt_exclude.
+       APPEND cl_gui_alv_grid=>mc_fc_check TO gt_exclude.
+
+
+    " =========================================================
+    " NHÓM 3: SINGLE ENTRY (Giữ nguyên hoặc tùy chỉnh riêng)
+    " =========================================================
+    WHEN 'GO_GRID_ITEM_SINGLE'.
+       " Ví dụ: Single Entry có thể cần nút xóa dòng, nên không ẩn
+       " Hoặc bạn có thể gọi FORM cũ: PERFORM get_alv_exclude_tb_func...
+
+    WHEN OTHERS.
+       " Các grid khác (như Monitoring)
+
+  ENDCASE.
 ENDFORM.
 
 *---------------------------------------------------------------------*
@@ -648,24 +876,49 @@ ENDFORM.
 *---------------------------------------------------------------------*
 FORM alv_fieldcatalog USING pv_grid_nm TYPE fieldname.
   CASE pv_grid_nm.
-   " --- 1. Header Validated & Failed (KHÔNG hiện cột SO/DLV) ---
-    WHEN 'GO_GRID_HDR_VAL' OR 'GO_GRID_HDR_FAIL'.
-       PERFORM alv_fieldcatalog_01 USING abap_false CHANGING gt_fcat_header.
+*   " --- 1. Header Validated & Failed (KHÔNG hiện cột SO/DLV) ---
+*    WHEN 'GO_GRID_HDR_VAL' OR 'GO_GRID_HDR_FAIL'.
+*       PERFORM alv_fieldcatalog_01 USING abap_false CHANGING gt_fcat_header.
+*
+*    " --- 2. Header Success (HIỆN cột SO/DLV) ---
+*    WHEN 'GO_GRID_HDR_SUC'.
+*       PERFORM alv_fieldcatalog_01 USING abap_true CHANGING gt_fcat_header.
+*
+*    " --- Nhóm Item (3 Tab) ---
+*    WHEN 'GO_GRID_ITM_VAL' OR 'GO_GRID_ITM_SUC' OR 'GO_GRID_ITM_FAIL'.
+*       PERFORM alv_fieldcatalog_02 CHANGING gt_fcat_item.
+*
+*    " --- Nhóm Condition (3 Tab) [MỚI] ---
+*    WHEN 'GO_GRID_CND_VAL' OR 'GO_GRID_CND_SUC' OR 'GO_GRID_CND_FAIL'.
+*       PERFORM alv_fieldcatalog_cond CHANGING gt_fcat_cond.
 
-    " --- 2. Header Success (HIỆN cột SO/DLV) ---
+    " --- Nhóm 1: VALIDATED (Vẫn để là Error/Msg Log) ---
+    WHEN 'GO_GRID_HDR_VAL'.
+       PERFORM alv_fieldcatalog_01 USING 'VAL' abap_false CHANGING gt_fcat_header.
+    WHEN 'GO_GRID_ITM_VAL'.
+       PERFORM alv_fieldcatalog_02 USING 'VAL' CHANGING gt_fcat_item.
+    WHEN 'GO_GRID_CND_VAL'.
+       PERFORM alv_fieldcatalog_cond USING 'VAL' CHANGING gt_fcat_cond.
+
+    " --- Nhóm 2: SUCCESS (Đổi thành Incomplete Log) ---
     WHEN 'GO_GRID_HDR_SUC'.
-       PERFORM alv_fieldcatalog_01 USING abap_true CHANGING gt_fcat_header.
+       PERFORM alv_fieldcatalog_01 USING 'SUC' abap_true CHANGING gt_fcat_header.
+    WHEN 'GO_GRID_ITM_SUC'.
+       PERFORM alv_fieldcatalog_02 USING 'SUC' CHANGING gt_fcat_item.
+    WHEN 'GO_GRID_CND_SUC'.
+       PERFORM alv_fieldcatalog_cond USING 'SUC' CHANGING gt_fcat_cond.
 
-    " --- Nhóm Item (3 Tab) ---
-    WHEN 'GO_GRID_ITM_VAL' OR 'GO_GRID_ITM_SUC' OR 'GO_GRID_ITM_FAIL'.
-       PERFORM alv_fieldcatalog_02 CHANGING gt_fcat_item.
-
-    " --- Nhóm Condition (3 Tab) [MỚI] ---
-    WHEN 'GO_GRID_CND_VAL' OR 'GO_GRID_CND_SUC' OR 'GO_GRID_CND_FAIL'.
-       PERFORM alv_fieldcatalog_cond CHANGING gt_fcat_cond.
+    " --- Nhóm 3: FAILED (Là Error Log) ---
+    WHEN 'GO_GRID_HDR_FAIL'.
+       PERFORM alv_fieldcatalog_01 USING 'FAIL' abap_false CHANGING gt_fcat_header.
+    WHEN 'GO_GRID_ITM_FAIL'.
+       PERFORM alv_fieldcatalog_02 USING 'FAIL' CHANGING gt_fcat_item.
+    WHEN 'GO_GRID_CND_FAIL'.
+       PERFORM alv_fieldcatalog_cond USING 'FAIL' CHANGING gt_fcat_cond.
     WHEN 'GO_GRID_ITEM_SINGLE'.
       PERFORM alv_fieldcatalog_single_item CHANGING gt_fieldcat_item_single.
       " --- KẾT THÚC THÊM MỚI ---
+      " <<< THÊM CASE NÀY VÀO >>>
       " <<< THÊM CASE NÀY VÀO >>>
     WHEN 'GO_GRID_CONDITIONS'.
       PERFORM alv_fieldcatalog_conditions CHANGING gt_fieldcat_conds.
@@ -686,11 +939,10 @@ FORM alv_fieldcatalog USING pv_grid_nm TYPE fieldname.
   ENDCASE.
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form ALV_FIELDCATALOG_01 (Header - Dynamic Columns)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM alv_fieldcatalog_01
-  USING    iv_show_result TYPE abap_bool " [MỚI] Cờ hiển thị
+  USING    iv_tab_type    TYPE char10 " [MỚI] VAL, SUC, FAIL
+           iv_show_result TYPE abap_bool " (Cờ hiện cột SO - giữ nguyên logic cũ nếu có)
   CHANGING pt_fieldcat    TYPE lvc_t_fcat.
 
   DATA ls_fcat TYPE lvc_s_fcat.
@@ -722,25 +974,69 @@ FORM alv_fieldcatalog_01
   ls_fcat-outputlen = 4.
   APPEND ls_fcat TO pt_fieldcat.
 
-  " [THÊM MỚI] Cột Error Details (Thường để cuối cùng)
+*  " [THÊM MỚI] Cột Error Details (Thường để cuối cùng)
+*  CLEAR ls_fcat.
+*  ls_fcat-fieldname = 'ERR_BTN'.
+*  ls_fcat-coltext   = 'Error Log'.
+*  ls_fcat-icon      = abap_true.   " Hiển thị dạng Icon
+*  ls_fcat-hotspot   = abap_true.   " Có thể click được
+*  ls_fcat-outputlen = 4.
+*  ls_fcat-just      = 'C'.
+*  APPEND ls_fcat TO pt_fieldcat.
+
+    " [SỬA LỖI]: Logic hiển thị nút Log dựa trên Tab
   CLEAR ls_fcat.
   ls_fcat-fieldname = 'ERR_BTN'.
-  ls_fcat-coltext   = 'Error Log'.
-  ls_fcat-icon      = abap_true.   " Hiển thị dạng Icon
-  ls_fcat-hotspot   = abap_true.   " Có thể click được
+  ls_fcat-icon      = abap_true.
+  ls_fcat-hotspot   = abap_true.
   ls_fcat-outputlen = 4.
   ls_fcat-just      = 'C'.
+  ls_fcat-fix_column = 'X'. " Nên fix cột này
+
+  " [LOGIC MỚI]: Đổi tên dựa trên Tab
+  IF iv_tab_type = 'SUC'.
+     ls_fcat-coltext   = 'Inc.Log'.       " Tên cột: Incomplete
+     ls_fcat-tooltip   = 'Incompletion Log'.
+  ELSE.
+     ls_fcat-coltext   = 'Err.Log'.       " Tên cột: Error
+     ls_fcat-tooltip   = 'Error Details'.
+  ENDIF.
+
   APPEND ls_fcat TO pt_fieldcat.
 
-  " 2. [SỬA QUAN TRỌNG] Chỉ hiện SO & Delivery nếu cờ = TRUE
+*  " 2. [SỬA QUAN TRỌNG] Chỉ hiện SO & Delivery nếu cờ = TRUE
+*  IF iv_show_result = abap_true.
+*    _add_fieldcat 'VBELN_SO'  'C' 'X' 'Sales Doc.'  'X' ''.
+*    _add_fieldcat 'VBELN_DLV' 'C' 'X' 'Delivery No' 'X' ''.
+*
+*    " (Lưu ý: Tôi dùng Macro cho gọn, nhưng đè lại thuộc tính edit = space để không cho sửa)
+*    " Hoặc bạn có thể khai báo thủ công như trước cũng được.
+*    " Logic edit = space cho 2 cột này đã được xử lý ở FORM ALV_LAYOUT (bước trước)
+*    " hoặc ALV tự khóa vì Tab Success chúng ta đã set layout edit = false toàn bộ.
+*  ENDIF.
+
+" 2. [SỬA QUAN TRỌNG] Chỉ hiện SO & Delivery nếu cờ = TRUE
   IF iv_show_result = abap_true.
-    _add_fieldcat 'VBELN_SO'  'C' 'X' 'Sales Doc.'  'X' ''.
+
+    " --- CỘT SALES ORDER (Có Hotspot) ---
+    CLEAR ls_fcat.
+    ls_fcat-fieldname   = 'VBELN_SO'.
+    ls_fcat-coltext     = 'Sales Doc.'.
+    ls_fcat-fix_column  = 'X'.
+    ls_fcat-col_opt     = 'X'.
+
+    " [QUAN TRỌNG]: Bật tính năng Click
+    ls_fcat-hotspot     = 'X'.
+
+    " Các thuộc tính khác (nếu cần giống macro)
+    ls_fcat-ref_table   = 'ZTB_SO_UPLOAD_HD'.
+    ls_fcat-ref_field   = 'VBELN_SO'.
+
+    APPEND ls_fcat TO pt_fieldcat.
+
+    " --- CỘT DELIVERY (Giữ nguyên, không Hotspot) ---
     _add_fieldcat 'VBELN_DLV' 'C' 'X' 'Delivery No' 'X' ''.
 
-    " (Lưu ý: Tôi dùng Macro cho gọn, nhưng đè lại thuộc tính edit = space để không cho sửa)
-    " Hoặc bạn có thể khai báo thủ công như trước cũng được.
-    " Logic edit = space cho 2 cột này đã được xử lý ở FORM ALV_LAYOUT (bước trước)
-    " hoặc ALV tự khóa vì Tab Success chúng ta đã set layout edit = false toàn bộ.
   ENDIF.
 
   " 3. Các cột dữ liệu (Luôn hiện)
@@ -765,10 +1061,11 @@ FORM alv_fieldcatalog_01
 
 ENDFORM.
 
-*---------------------------------------------------------------------*
-* Form alv_fieldcatalog_02 - Item Fields
-*---------------------------------------------------------------------*
-FORM alv_fieldcatalog_02 CHANGING pt_fieldcat TYPE lvc_t_fcat.
+"chú ý 2
+FORM alv_fieldcatalog_02
+  USING    iv_tab_type    TYPE char10 " [MỚI] VAL, SUC, FAIL
+*           iv_show_result TYPE abap_bool OPTIONAL " (Cờ hiện cột SO - giữ nguyên logic cũ nếu có)
+  CHANGING pt_fieldcat    TYPE lvc_t_fcat.
   DATA ls_fcat TYPE lvc_s_fcat.
   REFRESH pt_fieldcat.
 
@@ -816,6 +1113,17 @@ FORM alv_fieldcatalog_02 CHANGING pt_fieldcat TYPE lvc_t_fcat.
   ls_fcat-hotspot   = abap_true.   " Có thể click được
   ls_fcat-outputlen = 4.
   ls_fcat-just      = 'C'.
+  ls_fcat-fix_column = 'X'. " Nên fix cột này
+
+  " [LOGIC MỚI]: Đổi tên dựa trên Tab
+  IF iv_tab_type = 'SUC'.
+     ls_fcat-coltext   = 'Inc.Log'.       " Tên cột: Incomplete
+     ls_fcat-tooltip   = 'Incompletion Log'.
+  ELSE.
+     ls_fcat-coltext   = 'Err.Log'.       " Tên cột: Error
+     ls_fcat-tooltip   = 'Error Details'.
+  ENDIF.
+
   APPEND ls_fcat TO pt_fieldcat.
 
   " --- UPDATED MACRO CALLS with EditMask ---
@@ -838,10 +1146,11 @@ FORM alv_fieldcatalog_02 CHANGING pt_fieldcat TYPE lvc_t_fcat.
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form ALV_FIELDCATALOG_COND (Cho bảng Pricing)
-*&---------------------------------------------------------------------*
-FORM alv_fieldcatalog_cond CHANGING pt_fieldcat TYPE lvc_t_fcat.
+"chú ý 2
+FORM alv_fieldcatalog_cond
+  USING    iv_tab_type    TYPE char10 " [MỚI] VAL, SUC, FAIL
+*           iv_show_result TYPE abap_bool OPTIONAL " (Cờ hiện cột SO - giữ nguyên logic cũ nếu có)
+  CHANGING pt_fieldcat    TYPE lvc_t_fcat.
   DATA ls_fcat TYPE lvc_s_fcat.
   REFRESH pt_fieldcat.
 
@@ -870,6 +1179,16 @@ FORM alv_fieldcatalog_cond CHANGING pt_fieldcat TYPE lvc_t_fcat.
   ls_fcat-hotspot   = abap_true.   " Có thể click được
   ls_fcat-outputlen = 4.
   ls_fcat-just      = 'C'.
+  ls_fcat-fix_column = 'X'. " Nên fix cột này
+
+  " [LOGIC MỚI]: Đổi tên dựa trên Tab
+  IF iv_tab_type = 'SUC'.
+     ls_fcat-coltext   = 'Inc.Log'.       " Tên cột: Incomplete
+     ls_fcat-tooltip   = 'Incompletion Log'.
+  ELSE.
+     ls_fcat-coltext   = 'Err.Log'.       " Tên cột: Error
+     ls_fcat-tooltip   = 'Error Details'.
+  ENDIF.
   APPEND ls_fcat TO pt_fieldcat.
 
   " Cấu hình cột cho Condition
@@ -890,9 +1209,7 @@ FORM alv_fieldcatalog_cond CHANGING pt_fieldcat TYPE lvc_t_fcat.
 *  APPEND ls_fcat TO pt_fieldcat.
 ENDFORM.
 
-*---------------------------------------------------------------------*
-* Form alv_event - Attach Toolbar & Command Handler
-*---------------------------------------------------------------------*
+"chú ý 2
 FORM alv_event USING pv_grid_nm TYPE fieldname.
 
   CASE pv_grid_nm.
@@ -1032,6 +1349,8 @@ FORM alv_event USING pv_grid_nm TYPE fieldname.
 
   ENDCASE.
 ENDFORM.
+
+
 *---------------------------------------------------------------------*
 * Form alv_outtab_display - Render ALV Data
 *---------------------------------------------------------------------*
@@ -1118,6 +1437,7 @@ FORM alv_outtab_display USING pv_grid_nm TYPE fieldname.
       i_bypassing_buffer = abap_true
       i_save             = 'A'
       is_layout          = gs_layout " Đảm bảo gs_layout đã được set trước đó
+      it_toolbar_excluding = gt_exclude  " <<< [QUAN TRỌNG]: Thêm dòng này vào!
     CHANGING
       it_outtab          = lt_data->* " Sẽ lấy đúng bảng dữ liệu đã gán ở CASE trên
       it_fieldcatalog    = lt_fcat    " Sẽ lấy đúng fieldcat đã gán ở CASE trên
@@ -1410,24 +1730,46 @@ FORM build_fieldcat_delivery CHANGING ct_fcat TYPE lvc_t_fcat.
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form BUILD_ALV_LAYOUT_0201 (Tab Validated: 3 ALVs)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM build_alv_layout_0201.
   STATICS: sv_first_call TYPE abap_bool VALUE abap_true.
   DATA: ls_stable TYPE lvc_s_stbl.
 
-  " --- 1. REFRESH nếu đã tồn tại ---
-  " (Dùng đúng tên biến toàn cục của Tab Validated)
+*  " --- 1. REFRESH nếu đã tồn tại ---
+*  " (Dùng đúng tên biến toàn cục của Tab Validated)
+*  IF go_grid_hdr_val IS BOUND AND go_grid_itm_val IS BOUND AND go_grid_cnd_val IS BOUND.
+*    ls_stable-row = abap_true.
+*    ls_stable-col = abap_true.
+*
+*    go_grid_hdr_val->refresh_table_display( is_stable = ls_stable ).
+*    go_grid_itm_val->refresh_table_display( is_stable = ls_stable ).
+*    go_grid_cnd_val->refresh_table_display( is_stable = ls_stable ).
+*    RETURN.
+*  ENDIF.
+
+    " --- 1. REFRESH (Cập nhật cả Data và Title) ---
   IF go_grid_hdr_val IS BOUND AND go_grid_itm_val IS BOUND AND go_grid_cnd_val IS BOUND.
     ls_stable-row = abap_true.
     ls_stable-col = abap_true.
 
+    " A. Header: Tính lại title -> Set vào Grid -> Refresh
+    PERFORM alv_set_gridtitle USING 'GO_GRID_HDR_VAL'. " Tính lại số dòng
+    go_grid_hdr_val->set_gridtitle( gv_grid_title ).   " Gán title mới vào Grid
     go_grid_hdr_val->refresh_table_display( is_stable = ls_stable ).
+
+    " B. Item
+    PERFORM alv_set_gridtitle USING 'GO_GRID_ITM_VAL'.
+    go_grid_itm_val->set_gridtitle( gv_grid_title ).
     go_grid_itm_val->refresh_table_display( is_stable = ls_stable ).
+
+    " C. Condition
+    PERFORM alv_set_gridtitle USING 'GO_GRID_CND_VAL'.
+    go_grid_cnd_val->set_gridtitle( gv_grid_title ).
     go_grid_cnd_val->refresh_table_display( is_stable = ls_stable ).
+
     RETURN.
   ENDIF.
+
 
   " --- 2. Free Controls cũ (Nếu chuyển từ tab khác sang) ---
   " (Lưu ý: Nếu dùng Subscreen riêng biệt thì không cần free biến của tab khác,
@@ -1469,7 +1811,6 @@ FORM build_alv_layout_0201.
   " --- 5. Hiển thị ---
   PERFORM alv_grid_display   USING 'GO_GRID_HDR_VAL'.
   PERFORM alv_outtab_display USING 'GO_GRID_HDR_VAL'.
-
   " [THÊM]: Đăng ký Edit Event cho Header (Validated)
   go_grid_hdr_val->register_edit_event( i_event_id = cl_gui_alv_grid=>mc_evt_modified ).
   go_grid_hdr_val->register_edit_event( i_event_id = cl_gui_alv_grid=>mc_evt_enter ).
@@ -1487,26 +1828,42 @@ FORM build_alv_layout_0201.
   cl_gui_cfw=>flush( ).
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form build_alv_layout_0202
-*&---------------------------------------------------------------------*
-*& text
-*&---------------------------------------------------------------------*
-*& -->  p1        text
-*& <--  p2        text
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM build_alv_layout_0202.
   STATICS: sv_first_call TYPE abap_bool VALUE abap_true.
   DATA: ls_stable TYPE lvc_s_stbl.
 
-  " --- 1. REFRESH (Dùng biến _SUC) ---
+*  " --- 1. REFRESH (Dùng biến _SUC) ---
+*  IF go_grid_hdr_suc IS BOUND AND go_grid_itm_suc IS BOUND AND go_grid_cnd_suc IS BOUND.
+*    ls_stable-row = abap_true.
+*    ls_stable-col = abap_true.
+*
+*    go_grid_hdr_suc->refresh_table_display( is_stable = ls_stable ).
+*    go_grid_itm_suc->refresh_table_display( is_stable = ls_stable ).
+*    go_grid_cnd_suc->refresh_table_display( is_stable = ls_stable ).
+*    RETURN.
+*  ENDIF.
+
+    " --- 1. REFRESH (Cập nhật cả Data và Title) ---
   IF go_grid_hdr_suc IS BOUND AND go_grid_itm_suc IS BOUND AND go_grid_cnd_suc IS BOUND.
     ls_stable-row = abap_true.
     ls_stable-col = abap_true.
 
-    go_grid_hdr_suc->refresh_table_display( is_stable = ls_stable ).
-    go_grid_itm_suc->refresh_table_display( is_stable = ls_stable ).
-    go_grid_cnd_suc->refresh_table_display( is_stable = ls_stable ).
+    " A. Header: Tính lại title -> Set vào Grid -> Refresh
+    PERFORM alv_set_gridtitle USING 'GO_GRID_HDR_SUC'. " Tính lại số dòng
+    GO_GRID_HDR_SUC->set_gridtitle( gv_grid_title ).   " Gán title mới vào Grid
+    GO_GRID_HDR_SUC->refresh_table_display( is_stable = ls_stable ).
+
+    " B. Item
+    PERFORM alv_set_gridtitle USING 'GO_GRID_ITM_SUC'.
+    GO_GRID_ITM_SUC->set_gridtitle( gv_grid_title ).
+    GO_GRID_ITM_SUC->refresh_table_display( is_stable = ls_stable ).
+
+    " C. Condition
+    PERFORM alv_set_gridtitle USING 'GO_GRID_CND_SUC'.
+    GO_GRID_CND_SUC->set_gridtitle( gv_grid_title ).
+    GO_GRID_CND_SUC->refresh_table_display( is_stable = ls_stable ).
+
     RETURN.
   ENDIF.
 
@@ -1554,26 +1911,43 @@ FORM build_alv_layout_0202.
 
   cl_gui_cfw=>flush( ).
 ENDFORM.
-*&---------------------------------------------------------------------*
-*& Form build_alv_layout_0203
-*&---------------------------------------------------------------------*
-*& text
-*&---------------------------------------------------------------------*
-*& -->  p1        text
-*& <--  p2        text
-*&---------------------------------------------------------------------*
+
+"chú ý 2
 FORM build_alv_layout_0203.
   STATICS: sv_first_call TYPE abap_bool VALUE abap_true.
   DATA: ls_stable TYPE lvc_s_stbl.
 
-  " --- 1. REFRESH (Dùng biến _FAIL) ---
+*  " --- 1. REFRESH (Dùng biến _FAIL) ---
+*  IF go_grid_hdr_fail IS BOUND AND go_grid_itm_fail IS BOUND AND go_grid_cnd_fail IS BOUND.
+*    ls_stable-row = abap_true.
+*    ls_stable-col = abap_true.
+*
+*    go_grid_hdr_fail->refresh_table_display( is_stable = ls_stable ).
+*    go_grid_itm_fail->refresh_table_display( is_stable = ls_stable ).
+*    go_grid_cnd_fail->refresh_table_display( is_stable = ls_stable ).
+*    RETURN.
+*  ENDIF.
+
+     " --- 1. REFRESH (Cập nhật cả Data và Title) ---
   IF go_grid_hdr_fail IS BOUND AND go_grid_itm_fail IS BOUND AND go_grid_cnd_fail IS BOUND.
     ls_stable-row = abap_true.
     ls_stable-col = abap_true.
 
-    go_grid_hdr_fail->refresh_table_display( is_stable = ls_stable ).
-    go_grid_itm_fail->refresh_table_display( is_stable = ls_stable ).
-    go_grid_cnd_fail->refresh_table_display( is_stable = ls_stable ).
+    " A. Header: Tính lại title -> Set vào Grid -> Refresh
+    PERFORM alv_set_gridtitle USING 'GO_GRID_HDR_FAIL'. " Tính lại số dòng
+    GO_GRID_HDR_FAIL->set_gridtitle( gv_grid_title ).   " Gán title mới vào Grid
+    GO_GRID_HDR_FAIL->refresh_table_display( is_stable = ls_stable ).
+
+    " B. Item
+    PERFORM alv_set_gridtitle USING 'GO_GRID_ITM_FAIL'.
+    GO_GRID_ITM_FAIL->set_gridtitle( gv_grid_title ).
+    GO_GRID_ITM_FAIL->refresh_table_display( is_stable = ls_stable ).
+
+    " C. Condition
+    PERFORM alv_set_gridtitle USING 'GO_GRID_CND_FAIL'.
+    GO_GRID_CND_FAIL->set_gridtitle( gv_grid_title ).
+    GO_GRID_CND_FAIL->refresh_table_display( is_stable = ls_stable ).
+
     RETURN.
   ENDIF.
 
@@ -1627,6 +2001,7 @@ FORM build_alv_layout_0203.
 
   cl_gui_cfw=>flush( ).
 ENDFORM.
+
 *&---------------------------------------------------------------------*
 *& Form REFRESH_ALL_ALVS
 *&---------------------------------------------------------------------*
@@ -1730,483 +2105,75 @@ FORM display_result_popup_alv.
   ENDIF.
 
 ENDFORM.
-**&---------------------------------------------------------------------*
-**& Form HIGHLIGHT_ERROR_CELLS
-**&---------------------------------------------------------------------*
-**& Updates the STYLE field in classified tables based on error list.
-**&---------------------------------------------------------------------*
-*FORM highlight_error_cells USING it_errors TYPE TABLE OF ty_validation_error.
-*
-*  " --- FIX: Define local table with specific type ---
-*  DATA: lt_local_errors TYPE STANDARD TABLE OF ty_validation_error WITH EMPTY KEY.
-*  lt_local_errors = it_errors. " Assign generic parameter to specific table
-*
-*  FIELD-SYMBOLS: <error>   LIKE LINE OF lt_local_errors,
-*                 <header>  LIKE LINE OF gt_so_header, " Use base type
-*                 <item>    LIKE LINE OF gt_so_item.   " Use base type
-*
-*  DATA: ls_style TYPE lvc_s_styl,
-*        lt_style TYPE lvc_t_styl.
-*
-*  LOOP AT lt_local_errors ASSIGNING <error>.
-*    CLEAR lt_style.
-*    ls_style-fieldname = <error>-fieldname.
-*    ls_style-style = cl_gui_alv_grid=>mc_style_enabled + " Base style
-*                     cl_gui_alv_grid=>mc_style_background +
-*                     cl_gui_alv_grid=>mc_style_int_negative. " Red background
-*    APPEND ls_style TO lt_style.
-*
-*    IF <error>-item_no IS INITIAL. " Header Error
-*      " Check all 3 header tables
-*      READ TABLE gt_so_header_comp ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <header>-style. ENDIF.
-*      READ TABLE gt_so_header_incomp ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <header>-style. ENDIF.
-*      READ TABLE gt_so_header_err ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <header>-style. ENDIF.
-*    ELSE. " Item Error
-*      " Check all 3 item tables
-*      READ TABLE gt_so_item_comp ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*      READ TABLE gt_so_item_incomp ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*      READ TABLE gt_so_item_err ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*    ELSE.
-*       " Header error, not yet found
-*       READ TABLE gt_so_header_err ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*       IF sy-subrc = 0.
-*         INSERT LINES OF lt_style INTO TABLE <header>-style.
-*       ELSE.
-*          " Item error, not yet found
-*          READ TABLE gt_so_item_err ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*           IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*       ENDIF.
-*    ENDIF.
-*  ENDLOOP.
-*ENDFORM.
 
-
-**&---------------------------------------------------------------------*
-**& Form HIGHLIGHT_ERROR_CELLS
-**&---------------------------------------------------------------------*
-*FORM highlight_error_cells USING it_errors TYPE ty_t_validation_error. " <<< CHANGE: Use specific table type
-*
-**  " --- FIX: Define local table with specific type ---
-**  DATA: lt_local_errors TYPE STANDARD TABLE OF ty_validation_error WITH EMPTY KEY.
-**  lt_local_errors = it_errors. " Assign generic parameter to specific table
-*
-*  FIELD-SYMBOLS: <error>   LIKE LINE OF it_errors, " <<< LIKE LINE OF works with specific type
-*                 <header>  LIKE LINE OF gt_so_header,
-*                 <item>    LIKE LINE OF gt_so_item.
-*
-*  DATA: ls_style TYPE lvc_s_styl,
-*        lt_style TYPE lvc_t_styl.
-*
-*  " --- Use the local table in the LOOP ---
-*  LOOP AT it_errors ASSIGNING <error>.
-*    CLEAR lt_style.
-*    ls_style-fieldname = <error>-fieldname.
-*    ls_style-style = cl_gui_alv_grid=>mc_style_enabled.
-**                     cl_gui_alv_grid=>mc_style_background +
-**                     cl_gui_alv_grid=>mc_style_int_negative.
-*    APPEND ls_style TO lt_style.
-*
-*    IF <error>-item_no IS INITIAL. " Header Error
-*      " Check all 3 header tables
-*      READ TABLE gt_so_header_comp ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <header>-style. ENDIF.
-*      READ TABLE gt_so_header_incomp ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <header>-style. ENDIF.
-*      READ TABLE gt_so_header_err ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <header>-style. ENDIF.
-*    ELSE. " Item Error
-*      " Check all 3 item tables
-*      READ TABLE gt_so_item_comp ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*      READ TABLE gt_so_item_incomp ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*      READ TABLE gt_so_item_err ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*      " --- REMOVED REDUNDANT ELSE BLOCK ---
-*      " ELSE. " This block was likely redundant or misplaced
-*      "  " Header error, not yet found
-*      "  READ TABLE gt_so_header_err ASSIGNING <header> WITH KEY temp_id = <error>-temp_id.
-*      "  IF sy-subrc = 0.
-*      "    INSERT LINES OF lt_style INTO TABLE <header>-style.
-*      "  ELSE.
-*      "     " Item error, not yet found
-*      "     READ TABLE gt_so_item_err ASSIGNING <item> WITH KEY temp_id = <error>-temp_id item_no = <error>-item_no.
-*      "      IF sy-subrc = 0. INSERT LINES OF lt_style INTO TABLE <item>-style. ENDIF.
-*      "  ENDIF.
-*      " ENDIF.
-*    ENDIF.
-*  ENDLOOP.
-*ENDFORM.
-**&---------------------------------------------------------------------*
-**& Form ALV_FIELDCATALOG_SINGLE_ITEM
-**&---------------------------------------------------------------------*
-**& Field Catalog cho ALV Single Entry Item (Screen 0112)
-**&---------------------------------------------------------------------*
-*FORM alv_fieldcatalog_single_item CHANGING pt_fieldcat TYPE lvc_t_fcat.
-*  DATA ls_fcat TYPE lvc_s_fcat.
-*  REFRESH pt_fieldcat.
-*
-**  " Macro riêng: &1=Fieldname, &2=Just, &3=Coltext, &4=Edit Flag
-**  DEFINE _add_field.
-**    CLEAR ls_fcat.
-**    ls_fcat-fieldname = &1.
-**    ls_fcat-just      = &2.
-**    ls_fcat-coltext   = &3.
-**    ls_fcat-seltext   = &3.
-**    ls_fcat-edit      = &4. " abap_true / abap_false
-**    APPEND ls_fcat TO pt_fieldcat.
-**  END-OF-DEFINITION.
-*
-*  DEFINE _add_field.
-*  CLEAR ls_fcat.
-*  ls_fcat-fieldname  = &1.
-*  ls_fcat-just       = &2.
-*  ls_fcat-coltext    = &3.
-*  ls_fcat-seltext    = &3.
-*  ls_fcat-edit       = &4.
-*  ls_fcat-ref_table  = 'TY_SINGLE_ITEM'. " <<< THÊM: Tham chiếu cấu trúc
-*  ls_fcat-ref_field  = &1.              " <<< THÊM: Tham chiếu trường
-*  " --- THÊM 2 DÒNG SAU CHO SỐ LƯỢNG VÀ GIÁ TRỊ ---
-*  ls_fcat-qfieldname = &5. " &5 = Tên cột Đơn vị (Unit)
-*  ls_fcat-cfieldname = &6. " &6 = Tên cột Tiền tệ (Currency)
-*  APPEND ls_fcat TO pt_fieldcat.
-*END-OF-DEFINITION.
-*
-*  " Fieldname         Just  Coltext                Edit Flag
-*  _add_field:
-**    'ITEM'            'R' 'Item'                 abap_false, " Output
-**    'MATERIAL'        'L' 'Material'             abap_true,  " Input
-**    'DESCRIPTION'     'L' 'Description'          abap_false, " Output
-**    'HI_LVL_ITEM'     'R' 'Higher-level item'    abap_false, " Output
-**    'UNIT'            'L' 'Sales Unit'           abap_true,  " Defaulted
-**    'QUANTITY'        'R' 'Order Quantity'       abap_true,  " Input
-**    'CONF_QTY'        'R' 'Confirmed quantity'   abap_false, " Output
-*
-*  'ITEM'            'R' 'Item'                  abap_false ''       '',
-*  'MATERIAL'        'L' 'Material'              abap_true  ''       '',
-*  'DESCRIPTION'     'L' 'Description'           abap_false ''       '',
-*  'HI_LVL_ITEM'     'R' 'Higher-level item'     abap_false ''       '',
-*  'UNIT'            'L' 'Sales Unit'            abap_true  ''       '',
-*  'QUANTITY'        'R' 'Order Quantity'        abap_true  'UNIT'   '', " <<< SỬA: Tham chiếu 'UNIT'
-*  'CONF_QTY'        'R' 'Confirmed quantity'    abap_false 'UNIT'   '', " <<< SỬA: Tham chiếu 'UNIT'
-*
-*    'ITCA'            'L' 'Itca'                 abap_false, " Output
-*    'COND_TYPE'       'L' 'CnTy'                 abap_true,  " Optional Input
-*    'REQ_DATE'        'C' 'Delivery Date'        abap_true,  " Defaulted
-*    'PLANT'           'L' 'Plant'                abap_true,  " Defaulted
-*    'SHIP_POINT'      'L' 'Shipping point'       abap_false, " Output
-*    'STORE_LOC'       'L' 'Storage location'     abap_true,  " Defaulted
-**    'UNIT_PRICE'      'R' 'Amount'               abap_true,  " Optional Input
-**    'PER'             'R' 'Per'                  abap_true,  " Optional Input
-**    'NET_PRICE'       'R' 'Net price'            abap_false, " Output
-**    'OVERALL_STATUS'  'L' 'Overall status'       abap_false, " Output
-**    'NET_VALUE'       'R' 'Total Net Value'      abap_false, " Output
-**    'TAX'             'R' 'Tax'                  abap_false. " Output
-*
-*     'UNIT_PRICE'      'R' 'Amount'               abap_true  ''       'CURRENCY', " <<< SỬA: Tham chiếu 'CURRENCY'
-*     'PER'             'R' 'Per'                  abap_true  ''       '',
-*     'NET_PRICE'       'R' 'Net price'            abap_false ''       'CURRENCY', " <<< SỬA
-*     'OVERALL_STATUS'  'L' 'Overall status'       abap_false            , " Output
-*     'NET_VALUE'       'R' 'Total Net Value'      abap_false ''       'CURRENCY', " <<< SỬA
-*     'TAX'             'R' 'Tax'                  abap_false ''       'CURRENCY'. " <<< SỬA
-*
-*ENDFORM.
-
-**&---------------------------------------------------------------------*
-**& Form ALV_FIELDCATALOG_SINGLE_ITEM (ĐÃ CẬP NHẬT)
-**&---------------------------------------------------------------------*
-*FORM alv_fieldcatalog_single_item CHANGING pt_fieldcat TYPE lvc_t_fcat.
-*  DATA ls_fcat TYPE lvc_s_fcat.
-*  REFRESH pt_fieldcat.
-*
-*  " Macro mới: &1=Fieldname, &2=Just, &3=Coltext, &4=Edit,
-*  "            &5=QField (Cột Unit), &6=CField (Cột Currency)
-*  DEFINE _add_field.
-*    CLEAR ls_fcat.
-*    ls_fcat-fieldname  = &1.
-*    ls_fcat-just       = &2.
-*    ls_fcat-coltext    = &3.
-*    ls_fcat-seltext    = &3.
-*    ls_fcat-edit       = &4. " abap_true / abap_false
-**    ls_fcat-ref_table  = 'TY_SINGLE_ITEM'. " Tham chiếu đến cấu trúc
-*    ls_fcat-ref_table = 'gt_item_details'.
-*    ls_fcat-qfieldname = &5. " Tham chiếu cột Quantity (UoM)
-*    ls_fcat-cfieldname = &6. " Tham chiếu cột Currency
-*    APPEND ls_fcat TO pt_fieldcat.
-*  END-OF-DEFINITION.
-*
-*  " Fieldname         Just  Coltext                Edit Flag  QField   CField
-*  _add_field:
-*    'ITEM_NO'         'R' 'Item'                 abap_false ''       '',
-*    'MATERIAL'        'L' 'Material'             abap_true  ''       '',
-*    'DESCRIPTION'     'L' 'Description'          abap_false ''       '',
-*    'HI_LVL_ITEM'     'R' 'Higher-level item'    abap_false ''       '',
-*    'UNIT'            'L' 'Sales Unit'           abap_true  ''       '',
-*    'QUANTITY'        'R' 'Order Quantity'       abap_true  'UNIT'   '', " <<< SỬA
-*    'CONF_QTY'        'R' 'Confirmed quantity'   abap_false 'UNIT'   '', " <<< SỬA
-*    'ITCA'            'L' 'Itca'                 abap_false ''       '',
-*    'COND_TYPE'       'L' 'CnTy'                 abap_true  ''       '',
-*    'REQ_DATE'        'C' 'Delivery Date'        abap_true  ''       '',
-*    'PLANT'           'L' 'Plant'                abap_true  ''       '',
-*    'SHIP_POINT'      'L' 'Shipping point'       abap_false ''       '',
-*    'STORE_LOC'       'L' 'Storage location'     abap_true  ''       '',
-*    'UNIT_PRICE'      'R' 'Amount'               abap_true  ''       'CURRENCY', " <<< SỬA
-*    'PER'             'R' 'Per'                  abap_true  ''       '',
-*    'NET_PRICE'       'R' 'Net price'            abap_false ''       'CURRENCY', " <<< SỬA
-*    'OVERALL_STATUS'  'L' 'Overall status'       abap_false ''       '',
-*    'NET_VALUE'       'R' 'Total Net Value'      abap_false ''       'CURRENCY', " <<< SỬA
-*    'TAX'             'R' 'Tax'                  abap_false ''       'CURRENCY', " <<< SỬA
-*    'CURRENCY'        'L' 'Currency'             abap_false ''       ''. " <<< THÊM (Có thể ẩn)
-*
-*ENDFORM.
-
-*FORM alv_fieldcatalog_single_item CHANGING pt_fieldcat TYPE lvc_t_fcat.
-*  DATA ls_fcat TYPE lvc_s_fcat.
-*  REFRESH pt_fieldcat.
-*
-*  " &1=fieldname &2=just &3=coltext &4=edit &5=qfield &6=cfield &7=ref_tab &8=ref_fld
-*  DEFINE _add.
-*    CLEAR ls_fcat.
-*    ls_fcat-fieldname   = &1.
-*    ls_fcat-just        = &2.
-*    ls_fcat-coltext     = &3.
-*    ls_fcat-seltext     = &3.
-*    ls_fcat-edit        = &4.                " abap_true/abap_false
-**    ls_fcat-qfieldname  = &5.                " UNIT ref
-**    ls_fcat-cfieldname  = &6.                " CURRENCY ref
-**    ls_fcat-ref_table   = &7.                " <-- DDIC ref is MUST for TYPES
-**    ls_fcat-ref_field   = &8.
-*
-*     " Kiểm tra nếu có QFIELDNAME/CURRENCY field thì mới gán
-**    IF &5 <> ''.
-**      ls_fcat-qfieldname = &5.
-**    ENDIF.
-**
-**    IF &6 <> ''.
-**      ls_fcat-cfieldname = &6.
-**  ENDIF.
-*
-*    APPEND ls_fcat TO pt_fieldcat.
-*  END-OF-DEFINITION.
-*
-*  "  Fieldname       J  Text                 Edit     QField  CField     ref_tab  ref_fld
-**  _add:
-**  'ITEM_NO'         'R' 'Item'               abap_false ''     ''         'VBAP'   'POSNR',
-**  'MATNR'        'L' 'Material'              abap_true  ''     ''         'VBAP'   'MATNR',
-**  'DESCRIPTION'     'L' 'Description'        abap_false ''     ''         'MAKT'   'MAKTX',
-**  'HI_LVL_ITEM'     'R' 'Higher-level item'  abap_false ''     ''         'VBAP'   'UEPOS',
-**
-**  " Unit & Quantity (qfieldname->UNIT, UNIT must have UNIT type)
-**  'UNIT'            'L' 'Sales Unit'         abap_true  ''     ''         'MARA'   'MEINS',
-**  'QUANTITY'        'R' 'Order Quantity'     abap_true  'UNIT' ''         'VBAP'   'KWMENG',
-**  'CONF_QTY'        'R' 'Confirmed quantity' abap_false 'UNIT' ''         'VBEP'   'BMENG',
-**
-**  " Item Category
-**  'ITCA'            'L' 'Itca'               abap_false ''     ''         'VBAP'   'PSTYV',
-**
-**  " Dates/plant/loc
-**  'COND_TYPE'       'L' 'CnTy'               abap_true  ''     ''         'BAPICOND' 'COND_TYPE',
-**  'REQ_DATE'        'C' 'Delivery date'      abap_true  ''     ''         'VBEP'   'EDATU',
-**  'PLANT'           'L' 'Plant'              abap_true  ''     ''         'VBAP'   'WERKS',
-**  'SHIP_POINT'      'L' 'Shipping point'     abap_false ''     ''         'VBAP'   'VSTEL',
-**  'STORE_LOC'       'L' 'Storage location'   abap_true  ''     ''         'VBAP'   'LGORT',
-**
-**  " Prices/values (cfieldname->CURRENCY, CURRENCY must be CUKY)
-***  'UNIT_PRICE'      'R' 'Amount'             abap_true  ''     'CURRENCY' 'KONV'   'KBETR',   " hoặc ZTB... nếu DDIC của bạn là CURR
-**  'UNIT_PRICE'      'R' 'Amount'             abap_true  ''     ''         ''       '',
-**  'PER'             'R' 'Per'                abap_true  ''     ''         'KONV'   'KPEIN',
-**  'NET_PRICE'       'R' 'Net price'          abap_false ''     'CURRENCY' 'VBAP'   'NETPR',
-**  'OVERALL_STATUS'  'L' 'Overall status'     abap_false ''     ''         'VBUP'   'GBSTA',
-**  'NET_VALUE'       'R' 'Total Net Value'    abap_false ''     'CURRENCY' 'VBAP'   'NETWR',
-**  'TAX'             'R' 'Tax'                abap_false ''     'CURRENCY' 'KOMV'   'MWSKZ',   " nếu bạn lưu tiền thuế → dùng WRBTR phù hợp
-**
-**  " Currency key (CUKY) – có thể ẩn nhưng PHẢI có trong fieldcat
-**  'CURRENCY'        'L' 'Currency'           abap_false ''     ''         'VBAK'   'WAERK'.
-*
-*   _add:
-*    'ITEM_NO'        'R' 'Item'                abap_false  ,
-*    'MATNR'          'L' 'Material'            abap_true  ,
-*    'DESCRIPTION'    'L' 'Description'         abap_false  ,
-*    'HI_LVL_ITEM'    'R' 'Higher-level item'   abap_false  ,
-*    'UNIT'           'L' 'Sales Unit'          abap_true   ,
-*    'QUANTITY'       'R' 'Order Quantity'      abap_true  , " nếu bạn không dùng QFIELDNAME nữa
-*    'CONF_QTY'       'R' 'Confirmed quantity'  abap_false  ,
-*    'ITCA'           'L' 'Itca'                abap_false  ,
-*    'COND_TYPE'      'L' 'Cond. Type'          abap_true   ,
-*    'REQ_DATE'       'C' 'Delivery date'       abap_true   ,
-*    'PLANT'          'L' 'Plant'               abap_true   ,
-*    'SHIP_POINT'     'L' 'Shipping point'      abap_false  ,
-*    'STORE_LOC'      'L' 'Storage location'    abap_true   ,
-*    'UNIT_PRICE'     'R' 'Amount'              abap_true   ,
-*    'PER'            'R' 'Per'                 abap_true  ,
-*    'NET_PRICE'      'R' 'Net price'           abap_false  ,
-*    'OVERALL_STATUS' 'L' 'Overall status'      abap_false  .
-*
-*
-*ENDFORM.
-
-**&---------------------------------------------------------------------*
-**& Form ALV_FIELDCATALOG_SINGLE_ITEM (ĐÃ SỬA LẠI HOÀN CHỈNH)
-**&---------------------------------------------------------------------*
-**FORM alv_fieldcatalog_single_item CHANGING pt_fieldcat TYPE lvc_t_fcat.
-**  DATA ls_fcat TYPE lvc_s_fcat.
-**  REFRESH pt_fieldcat.
-**
-**   SỬA LẠI MACRO: Thêm &5 (QField), &6 (CField), &7 (RefTab), &8 (RefFld)
-**  DEFINE _add.
-**    CLEAR ls_fcat.
-**    ls_fcat-fieldname   = &1.
-**    ls_fcat-just        = &2.
-**    ls_fcat-coltext     = &3.
-**    ls_fcat-seltext     = &3.
-**    ls_fcat-edit        = &4.
-**    ls_fcat-qfieldname  = &5.  " <<< THÊM LẠI: Tham chiếu cột Quantity (UoM)
-**    ls_fcat-cfieldname  = &6.  " <<< THÊM LẠI: Tham chiếu cột Currency
-**    ls_fcat-ref_table   = &7.  " <<< THÊM LẠI: Tham chiếu Bảng DDIC
-**    ls_fcat-ref_field   = &8.  " <<< THÊM LẠI: Tham chiếu Trường DDIC
-**    APPEND ls_fcat TO pt_fieldcat.
-**  END-OF-DEFINITION.
-**
-**   Fieldname        Just  Coltext                Edit        QField  CField      RefTab      RefFld
-**  _add:
-**    'ITEM_NO'        'R'   'Item'                 abap_false  ''      ''          'VBAP'      'POSNR',
-**    'MATNR'          'L'   'Material'             abap_true   ''      ''          'VBAP'      'MATNR',
-**    'DESCRIPTION'    'L'   'Description'          abap_false  ''      ''          'MAKT'      'MAKTX',
-**    'HI_LVL_ITEM'    'R'   'Higher-level item'    abap_false  ''      ''          'VBAP'      'UEPOS',
-**    'UNIT'           'L'   'Sales Unit'           abap_true   ''      ''          'VBAP'      'VRKME',
-**    'QUANTITY'       'R'   'Order Quantity'       abap_true   'UNIT'  ''          'VBAP'      'KWMENG',
-**    'CONF_QTY'       'R'   'Confirmed quantity'   abap_false  'UNIT'  ''          'VBEP'      'BMENG',
-**    'ITCA'           'L'   'Itca'                 abap_false  ''      ''          'VBAP'      'PSTYV',
-**    'COND_TYPE'      'L'   'Cond. Type'           abap_true   ''      ''          'BAPICOND'  'COND_TYPE',
-**    'REQ_DATE'       'C'   'Delivery date'        abap_true   ''      ''          'VBEP'      'EDATU',
-**    'PLANT'          'L'   'Plant'                abap_true   ''      ''          'VBAP'      'WERKS',
-**    'SHIP_POINT'     'L'   'Shipping point'       abap_false  ''      ''          'VBAP'      'VSTEL',
-**    'STORE_LOC'      'L'   'Storage location'     abap_true   ''      ''          'VBAP'      'LGORT',
-**    'UNIT_PRICE'     'R'   'Amount'               abap_true   ''      'CURRENCY'  'KONV'      'KBETR',
-**    'PER'            'R'   'Per'                  abap_true   ''      ''          'KONV'      'KPEIN',
-**    'NET_PRICE'      'R'   'Net price'            abap_false  ''      'CURRENCY'  'VBAP'      'NETPR',
-**    'OVERALL_STATUS' 'L'   'Overall status'       abap_false  ''      ''          'VBUP'      'GBSTA'.
-**     --- THÊM CỘT CURRENCY (BẮT BUỘC NẾU DÙNG CFIELDNAME = 'CURRENCY') ---
-**     Cột này phải tồn tại trong 'ty_single_item' và trong fieldcat.
-**     Bạn có thể ẩn nó đi nếu không muốn user thấy bằng cách thêm ls_fcat-no_out = 'X' vào macro.
-**  _add:
-**    'CURRENCY'       'L'   'Currency'             abap_false  ''      ''          'VBAK'      'WAERK'.
-**
-**ENDFORM.
-
-**&---------------------------------------------------------------------*
-**& Form ALV_FIELDCATALOG_SINGLE_ITEM (THEO FORMAT MỚI)
-**&---------------------------------------------------------------------*
-*FORM alv_fieldcatalog_single_item CHANGING pt_fieldcat TYPE lvc_t_fcat.
-*  DATA ls_fcat TYPE lvc_s_fcat.
-*  REFRESH pt_fieldcat.
-*
-*  " --- Macro GIỐNG HỆT _01/_02 (nhưng không có edit_mask) ---
-*  " &1 = Fieldname, &2 = Just, &3 = Coltext, &4 = FixCol
-*  DEFINE _add_fieldcat.
-*    CLEAR ls_fcat.
-*    ls_fcat-edit       = COND #( WHEN gs_edit = abap_true THEN 'X' ELSE space ).
-*    " Edit-mode sẽ được control bằng `set_ready_for_input = 1`
-*    " và `gs_layout-edit = 'X'` (trong build_alv_layout_single_item)
-*    " ls_fcat-edit      = abap_true. " <-- Chúng ta set edit cho từng cột
-*    ls_fcat-fieldname   = &1.
-*    ls_fcat-just        = &2.
-*    ls_fcat-coltext     = &3.
-*    ls_fcat-seltext     = &3.
-*    ls_fcat-tooltip     = &3.
-*    ls_fcat-fix_column  = &4.
-*    " --- ĐỒNG BỘ: Dùng Z-table mới làm tham chiếu ---
-*    ls_fcat-ref_table   = 'ZTB_SO_ITEM_SING'.
-*    ls_fcat-ref_field   = &1. " Tên trường Z-table = Tên fieldname
-*
-*    " === SỬA LẠI: Gán edit-flag thủ công (vì _01/_02 dùng gs_edit) ===
-*    CASE &1.
-*      " Các trường user được phép nhập
-*      WHEN 'MATNR' OR 'UNIT' OR 'QUANTITY' OR 'COND_TYPE' OR
-*           'REQ_DATE' OR 'PLANT' OR 'STORE_LOC' OR
-*           'UNIT_PRICE' OR 'PER'.
-*        ls_fcat-edit = abap_true.
-*      " Các trường auto-fill hoặc output-only
-*      WHEN OTHERS.
-*        ls_fcat-edit = abap_false.
-*    ENDCASE.
-*
-*    APPEND ls_fcat TO pt_fieldcat.
-*  END-OF-DEFINITION.
-*
-*  " --- Fieldname         Just  Coltext                FixCol ---
-*  _add_fieldcat:
-*    'ITEM_NO'         'R'   'Item'                 abap_false,
-*    'MATNR'           'L'   'Material'             abap_false,
-*    'DESCRIPTION'     'L'   'Description'          abap_false,
-*    'HI_LVL_ITEM'     'R'   'Higher-level item'    abap_false,
-*    'UNIT'            'L'   'Sales Unit'           abap_false,
-*    'QUANTITY'        'R'   'Order Quantity'       abap_false,
-*    'CONF_QTY'        'R'   'Confirmed quantity'   abap_false,
-*    'ITCA'            'L'   'Itca'                 abap_false,
-*    'COND_TYPE'       'L'   'Cond. Type'           abap_false,
-*    'REQ_DATE'        'C'   'Delivery date'        abap_false,
-*    'PLANT'           'L'   'Plant'                abap_false,
-*    'SHIP_POINT'      'L'   'Shipping point'       abap_false,
-*    'STORE_LOC'       'L'   'Storage location'     abap_false,
-*    'UNIT_PRICE'      'R'   'Amount'               abap_false,
-*    'PER'             'R'   'Per'                  abap_false,
-*    'NET_PRICE'       'R'   'Net price'            abap_false,
-*    'OVERALL_STATUS'  'L'   'Overall status'       abap_false,
-**    'CURRENCY'        'L'   'Currency'             abap_false.
-*
-*ENDFORM.
-
-*&---------------------------------------------------------------------*
-*& Form ALV_FIELDCATALOG_SINGLE_ITEM (ĐÃ ĐỒNG BỘ)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM alv_fieldcatalog_single_item CHANGING pt_fieldcat TYPE lvc_t_fcat.
   DATA ls_fcat TYPE lvc_s_fcat.
-  REFRESH pt_fieldcat.
+  DATA lv_pos  TYPE i.
 
-  " --- Macro ĐỒNG BỘ (giống hệt _01/_02) ---
-  " &1 = Fieldname
-  " &2 = Just
-  " &3 = Col_Opt (Optimize width)
-  " &4 = Coltext (Text)
-  " &5 = Fix_Column
-  " &6 = Edit_Mask
+  REFRESH pt_fieldcat.
+  lv_pos = 0.
+
+  " --- Macro ĐỒNG BỘ ---
   DEFINE _add_fieldcat.
+    ADD 1 TO lv_pos.
     CLEAR ls_fcat.
-*    ls_fcat-edit       = COND #( WHEN gs_edit = abap_true THEN 'X' ELSE space ).
+    ls_fcat-col_pos     = lv_pos.
     ls_fcat-fieldname   = &1.
     ls_fcat-just        = &2.
-    ls_fcat-col_opt     = &3.  " <<< THÊM: Tối ưu độ rộng cột
+    ls_fcat-col_opt     = &3.
     ls_fcat-coltext     = &4.
-    ls_fcat-seltext     = &4.  " <<< THÊM: Đồng bộ text
-    ls_fcat-tooltip     = &4.  " <<< THÊM: Đồng bộ text
-    ls_fcat-scrtext_l   = &4.  " <<< THÊM: Đồng bộ text
-    ls_fcat-scrtext_m   = &4.  " <<< THÊM: Đồng bộ text
-    ls_fcat-scrtext_s   = &4.  " <<< THÊM: Đồng bộ text
+    ls_fcat-seltext     = &4.
+    ls_fcat-tooltip     = &4.
+    ls_fcat-scrtext_l   = &4.
+    ls_fcat-scrtext_m   = &4.
+    ls_fcat-scrtext_s   = &4.
     ls_fcat-fix_column  = &5.
-    ls_fcat-ref_table   = 'ZTB_SO_ITEM_SING'. " (Tên Z-Table của bạn)
+    ls_fcat-ref_table   = 'ZTB_SO_ITEM_SING'.
     ls_fcat-ref_field   = &1.
-    ls_fcat-edit_mask   = &6.  " <<< THÊM: Edit Mask
+    ls_fcat-edit_mask   = &6.
 
-    " <<< THÊM DÒNG NÀY ĐỂ TẮT CONVERSION EXIT >>>
+    " [1] Tắt Conversion Exit cho MATNR
     IF &1 = 'MATNR'.
       ls_fcat-no_convext = 'X'.
     ENDIF.
 
-    " === Logic Edit (Giữ nguyên) ===
+    " ==========================================================
+    " [2] LOGIC RIÊNG DỰA TRÊN STRUCTURE MÀN HÌNH (TRỰC TIẾP)
+    " ==========================================================
+    " Thay gv_order_type bằng gs_so_heder_ui-so_hdr_auart
+    IF gs_so_heder_ui-so_hdr_auart = 'ZDR' OR gs_so_heder_ui-so_hdr_auart = 'ZCRR'. " <--- SỬA Ở ĐÂY
+
+       " Đổi tên QUANTITY -> Target Quantity
+       IF &1 = 'QUANTITY'.
+          ls_fcat-coltext   = 'Target Quantity'.
+          ls_fcat-scrtext_l = 'Target Quantity'.
+          ls_fcat-scrtext_m = 'Tgt Qty'.
+          ls_fcat-scrtext_s = 'Tgt Qty'.
+       ENDIF.
+
+       " Requirement Segment: Hiện cho ZDR
+       IF &1 = 'REQ_SEGMENT'.
+          ls_fcat-no_out = space.
+       ENDIF.
+
+    ELSE. " Các loại khác (ZORR...)
+
+       " Requirement Segment: Ẩn cho ZORR
+       IF &1 = 'REQ_SEGMENT'.
+          ls_fcat-no_out = 'X'.
+       ENDIF.
+
+    ENDIF.
+
+    " ==========================================================
+    " [3] LOGIC EDITABLE
+    " ==========================================================
     CASE &1.
-      " Các trường user được phép nhập
       WHEN 'MATNR' OR 'UNIT' OR 'QUANTITY' OR 'COND_TYPE' OR
            'REQ_DATE' OR 'PLANT' OR 'STORE_LOC' OR
-           'UNIT_PRICE' OR 'PER'.
+           'UNIT_PRICE' OR 'PER' OR 'REQ_SEGMENT'.
         ls_fcat-edit = abap_true.
-      " Các trường auto-fill hoặc output-only
       WHEN OTHERS.
         ls_fcat-edit = abap_false.
     ENDCASE.
@@ -2214,230 +2181,33 @@ FORM alv_fieldcatalog_single_item CHANGING pt_fieldcat TYPE lvc_t_fcat.
     APPEND ls_fcat TO pt_fieldcat.
   END-OF-DEFINITION.
 
-  " --- Các lời gọi Macro (ĐÃ CẬP NHẬT 6 THAM SỐ) ---
-  " Fieldname         Just  Opt       Coltext                FixCol      EditMask
+  " --- DANH SÁCH CỘT (GIỮ NGUYÊN NHƯ ĐÃ CHỐT) ---
   _add_fieldcat:
     'ITEM_NO'         'R'   abap_on   'Item'                 abap_off  '',
     'MATNR'           'L'   abap_on   'Material'             abap_off  '',
-    'DESCRIPTION'     'L'   abap_on   'Description'          abap_off  '',
-    'HI_LVL_ITEM'     'R'   abap_on   'Higher-level item'    abap_off  '',
-    'UNIT'            'L'   abap_on   'Sales Unit'           abap_off  '',
+    'REQ_SEGMENT'     'L'   abap_on   'Req. Segment'         abap_off  '',
     'QUANTITY'        'R'   abap_on   'Order Quantity'       abap_off  '',
-    'CONF_QTY'        'R'   abap_on   'Confirmed quantity'   abap_off  '',
-    'ITCA'            'L'   abap_on   'Itca'                 abap_off  '',
-    'COND_TYPE'       'L'   abap_on   'Cond. Type'           abap_off  '',
-    'REQ_DATE'        'C'   abap_on   'Delivery date'        abap_off  '__.__.____', " <<< THÊM MASK
+    'UNIT'            'L'   abap_on   'Sales Unit'           abap_off  '',
+    'NET_VALUE'       'R'   abap_on   'Net Value'            abap_off  '',
+    'CURRENCY'        'L'   abap_on   'Currency'             abap_off  '',
+    'DESCRIPTION'     'L'   abap_on   'Description'          abap_off  '',
+    'ITCA'            'L'   abap_on   'Item Category'        abap_off  '',
     'PLANT'           'L'   abap_on   'Plant'                abap_off  '',
     'SHIP_POINT'      'L'   abap_on   'Shipping point'       abap_off  '',
     'STORE_LOC'       'L'   abap_on   'Storage location'     abap_off  '',
+    'OVERALL_STATUS'  'L'   abap_on   'Overall status'       abap_off  '',
+    'CONF_QTY'        'R'   abap_on   'Confirmed quantity'   abap_off  '',
+    'COND_TYPE'       'L'   abap_on   'Cond. Type'           abap_off  '',
+    'REQ_DATE'        'C'   abap_on   'Delivery date'        abap_off  '__.__.____',
     'UNIT_PRICE'      'R'   abap_on   'Amount'               abap_off  '',
     'PER'             'R'   abap_on   'Per'                  abap_off  '',
+    'TAX'             'R'   abap_on   'Tax Amount'           abap_off  '',
     'NET_PRICE'       'R'   abap_on   'Net price'            abap_off  '',
-    'OVERALL_STATUS'  'L'   abap_on   'Overall status'       abap_off  '',
-    'CURRENCY'        'L'   abap_on   'Currency'             abap_off  ''.
+    'HI_LVL_ITEM'     'R'   abap_on   'Higher-level item'    abap_off  ''.
 
 ENDFORM.
 
-
-**&---------------------------------------------------------------------*
-**& Form BUILD_ALV_LAYOUT_SINGLE_ITEM
-**&---------------------------------------------------------------------*
-**& PBO logic cho Subscreen 0112 (Tab "Item Details" của Single Entry)
-**&---------------------------------------------------------------------*
-*FORM build_alv_layout_single_item.
-*
-*  " Chỉ tạo ALV lần đầu tiên
-*  IF go_grid_item_single IS NOT BOUND.
-*    DATA lo_cont TYPE REF TO cl_gui_custom_container.
-*
-*    " 1. Tạo Container
-*    CREATE OBJECT lo_cont
-*      EXPORTING
-*        container_name = 'ALL_ITEMS' " <<< Tên Custom Control trên Subscreen 0112
-*      EXCEPTIONS
-*        OTHERS = 1.
-*    IF sy-subrc <> 0.
-*      MESSAGE 'Error creating container CC_ITEM_SINGLE.' TYPE 'E'.
-*      RETURN.
-*    ENDIF.
-*
-*    " 2. Tạo ALV Grid
-*    CREATE OBJECT go_grid_item_single
-*      EXPORTING
-*        i_parent = lo_cont.
-*
-*    go_grid_item_single->register_edit_event( cl_gui_alv_grid=>mc_evt_enter ).
-*    go_grid_item_single->register_edit_event( cl_gui_alv_grid=>mc_evt_modified ).
-*
-*
-*    " 3. Chuẩn bị Field Catalog (Gọi dispatcher, dispatcher sẽ gọi FORM mới)
-*    PERFORM alv_fieldcatalog_single_item CHANGING gt_fieldcat_item_single.
-*
-**    " 4. Chuẩn bị Layout
-**    PERFORM alv_layout USING 'GO_GRID_ITEM_SINGLE'. " Sẽ set sel_mode = 'A', edit = 'X'
-**    gs_layout-edit = abap_true. " Ép edit mode = ON
-*
-*        " 4. Chuẩn bị Layout
-*    PERFORM alv_layout USING 'GO_GRID_ITEM_SINGLE'.
-*      gs_layout-edit = abap_true.  " <<< MỞ LẠI DÒNG NÀY
-*      " gs_layout-edit = abap_false. " <<< COMMENT DÒNG NÀY
-*
-*    " 5. Gắn Event Handler (cho CRUD)
-*    IF go_event_handler_single IS NOT BOUND.
-*       CREATE OBJECT go_event_handler_single
-*         EXPORTING
-*           io_grid  = go_grid_item_single
-*           it_table = REF #( gt_item_details ).
-*    ENDIF.
-*    SET HANDLER:
-*      go_event_handler_single->handle_user_command FOR go_grid_item_single,
-*      go_event_handler_single->handle_toolbar      FOR go_grid_item_single,
-*      go_event_handler_single->handle_data_changed FOR go_grid_item_single. " <<< THÊM DÒNG NÀY
-*
-*    SET HANDLER go_event_handler_single->handle_data_changed_finished FOR go_grid_item_single.
-*
-*
-**      " --- THÊM LOGIC: Đảm bảo có ít nhất 1 dòng trống ban đầu ---
-**    IF gt_item_details IS INITIAL.
-**      APPEND INITIAL LINE TO gt_item_details.
-**    ENDIF.
-**    " --- KẾT THÚC THÊM LOGIC ---
-*
-*    " 6. Hiển thị ALV
-*    CALL METHOD go_grid_item_single->set_table_for_first_display
-*      EXPORTING
-*        is_layout     = gs_layout
-*      CHANGING
-*        it_outtab     = gt_item_details
-*        it_fieldcatalog = gt_fieldcat_item_single. " <<< Dùng fieldcat MỚI
-*
-*      " <<< THÊM DÒNG NÀY ĐỂ KÍCH HOẠT CHỨC NĂNG BẮT SỰ KIỆN >>>
-*  CALL METHOD go_grid_item_single->set_ready_for_input
-*    EXPORTING
-*      i_ready_for_input = 1.
-*  " <<< KẾT THÚC THÊM >>>
-*
-*    cl_gui_cfw=>flush( ).
-*  ENDIF.
-*ENDFORM.
-
-**&---------------------------------------------------------------------*
-**& Form BUILD_ALV_LAYOUT_SINGLE_ITEM (THEO CẤU TRÚC MỚI)
-**&---------------------------------------------------------------------*
-*FORM build_alv_layout_single_item.
-*
-*  " 1. Chỉ chạy 1 lần (để tạo control)
-*  STATICS: sv_first_call TYPE abap_bool VALUE abap_true.
-*  IF go_grid_item_single IS BOUND AND sv_first_call = abap_false.
-*    RETURN.
-*  ENDIF.
-*
-*  " 2. Hủy control cũ nếu có (để tránh lỗi khi quay lại)
-*  IF go_grid_item_single IS BOUND.
-*    go_grid_item_single->free( ).
-*    CLEAR go_grid_item_single.
-*  ENDIF.
-*  IF go_event_handler_single IS BOUND.
-*    FREE go_event_handler_single.
-*  ENDIF.
-*
-*  " 3. Tạo Container (Giống code cũ của bạn)
-*  DATA: lo_cont TYPE REF TO cl_gui_custom_container.
-*  CREATE OBJECT lo_cont
-*    EXPORTING
-*      container_name = 'ALL_ITEMS' " Tên Custom Control trên Subscreen 0112
-*    EXCEPTIONS
-*      cntl_error = 1
-*      cntl_system_error = 2
-*      create_error = 3
-*      lifetime_error = 4
-*      lifetime_dynpro_dynpro_link = 5
-*      OTHERS = 6.
-*
-*  IF sy-subrc <> 0.
-*    " SỬA: Dùng 'S' DISPLAY LIKE 'E' để tránh crash
-*    MESSAGE 'Error creating container ALL_ITEMS.' TYPE 'E'.
-*    RETURN.
-*  ENDIF.
-*
-*  " 4. Tạo ALV Grid (Giống code cũ của bạn)
-*  CREATE OBJECT go_grid_item_single
-*    EXPORTING
-*      i_parent = lo_cont.
-*
-*  " 5. Đăng ký các sự kiện (Giống code cũ của bạn)
-**  go_grid_item_single->register_edit_event( cl_gui_alv_grid=>mc_evt_enter ).
-**  go_grid_item_single->register_edit_event( cl_gui_alv_grid=>mc_evt_modified ).
-*
-*  " 6. [CHUẨN HÓA] Gọi helper FORMs (Giống Mass Upload)
-*  PERFORM alv_grid_display USING 'GO_GRID_ITEM_SINGLE'.
-*  PERFORM alv_outtab_display USING 'GO_GRID_ITEM_SINGLE'.
-*
-**  " 7. [CHUẨN HÓA] Bật chế độ Edit (vì ALV này luôn edit)
-**  CALL METHOD go_grid_item_single->set_ready_for_input
-**    EXPORTING
-**      i_ready_for_input = 1.
-*
-*  " 8. Flush
-*  cl_gui_cfw=>flush( ).
-*ENDFORM.
-
-
-**&---------------------------------------------------------------------*
-**& Form BUILD_ALV_LAYOUT_SINGLE_ITEM (SỬA LỖI HIỂN THỊ)
-**&---------------------------------------------------------------------*
-*FORM build_alv_layout_single_item.
-*
-*  " 1. Tạo Container (PHẢI LÀM MỖI LẦN PBO)
-*  DATA lo_cont TYPE REF TO cl_gui_custom_container.
-*  CREATE OBJECT lo_cont
-*    EXPORTING
-*      container_name = 'ALL_ITEMS' " Tên Custom Control trên Subscreen 0112
-*    EXCEPTIONS
-*      OTHERS         = 1.
-*  IF sy-subrc <> 0.
-*    " Dùng 'E' vì PBO có thể dừng.
-*    MESSAGE 'Error creating container ALL_ITEMS.' TYPE 'E'.
-*    RETURN.
-*  ENDIF.
-*
-*  " 2. Kiểm tra Grid Object
-*  IF go_grid_item_single IS INITIAL.
-*    " --- LẦN CHẠY ĐẦU TIÊN (HOẶC SAU KHI BỊ FREE) ---
-*
-*    " 2a. Tạo ALV Grid, gán vào container
-*    CREATE OBJECT go_grid_item_single
-*      EXPORTING
-*        i_parent = lo_cont.
-*
-*    " 2b. Đăng ký sự kiện (BỎ COMMENT LẠI, VÌ LỖI CRASH ĐÃ SỬA)
-*    go_grid_item_single->register_edit_event( cl_gui_alv_grid=>mc_evt_enter ).
-*    go_grid_item_single->register_edit_event( cl_gui_alv_grid=>mc_evt_modified ).
-*
-*    " 2c. Gọi helper FORMs (Như bạn muốn)
-*    PERFORM alv_grid_display USING 'GO_GRID_ITEM_SINGLE'.
-*    PERFORM alv_outtab_display USING 'GO_GRID_ITEM_SINGLE'.
-*
-*    " 2d. Bật chế độ Edit (BỎ COMMENT LẠI)
-*    CALL METHOD go_grid_item_single->set_ready_for_input
-*      EXPORTING
-*        i_ready_for_input = 1.
-*
-*  ELSE.
-*    " --- CÁC LẦN PBO SAU (VÍ DỤ: SAU KHI NHẤN ENTER) ---
-*    " Grid object đã tồn tại, chỉ cần "gắn" nó lại với container MỚI
-*    CALL METHOD go_grid_item_single->set_parent
-*      EXPORTING
-*        parent = lo_cont.
-*  ENDIF.
-*
-*  " 3. Flush (Chạy mỗi PBO)
-*  cl_gui_cfw=>flush( ).
-*ENDFORM.
-
-*&---------------------------------------------------------------------*
-*& Form BUILD_ALV_LAYOUT_SINGLE_ITEM (SỬA LỖI HIỂN THỊ - CHUẨN)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM build_alv_layout_single_item.
 
   " 1. Tạo Container (CHỈ 1 LẦN)
@@ -2496,12 +2266,60 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form ALV_FIELDCATALOG_CONDITIONS (Đồng bộ với Item Details)
 *&---------------------------------------------------------------------*
+"chú ý 1
+*FORM alv_fieldcatalog_conditions CHANGING pt_fieldcat TYPE lvc_t_fcat.
+*  DATA ls_fcat TYPE lvc_s_fcat.
+*  REFRESH pt_fieldcat.
+*
+*  " --- Macro ĐỒNG BỘ (giống hệt Item Details) ---
+*  " &1 = Fieldname, &2 = Just, &3 = Col_Opt, &4 = Coltext, &5 = Fix_Col, &6 = Edit_Mask
+*  DEFINE _add_fieldcat.
+*    CLEAR ls_fcat.
+*    ls_fcat-fieldname   = &1.
+*    ls_fcat-just        = &2.
+*    ls_fcat-col_opt     = &3.
+*    ls_fcat-coltext     = &4.
+*    ls_fcat-seltext     = &4.
+*    ls_fcat-tooltip     = &4.
+*    ls_fcat-scrtext_l   = &4.
+*    ls_fcat-scrtext_m   = &4.
+*    ls_fcat-scrtext_s   = &4.
+*    ls_fcat-fix_column  = &5.
+*    ls_fcat-ref_table   = 'ZTB_SO_COND_SING'. " <<< Dùng Z-table mới
+*    ls_fcat-ref_field   = &1.
+*    ls_fcat-edit_mask   = &6.
+*
+*    " (Không cần no_convext cho KSCHL)
+*
+*    " === Logic Edit (Chỉ cho nhập Amount) ===
+*    CASE &1.
+**      WHEN 'AMOUNT'. " Chỉ cho phép sửa cột Amount
+**        ls_fcat-edit = abap_true.
+*      WHEN OTHERS.
+*        ls_fcat-edit = abap_false.
+*    ENDCASE.
+*
+*    APPEND ls_fcat TO pt_fieldcat.
+*  END-OF-DEFINITION.
+*
+*  " --- Fieldname         Just  Opt       Coltext             FixCol      EditMask
+*  _add_fieldcat:
+*    'ICON'            'C'   abap_on   'Inactive'          abap_false  '',
+*    'KSCHL'           'L'   abap_on   'CnTy'              abap_false  '',
+*    'VTEXT'           'L'   abap_on   'Description'       abap_false  '',
+*    'AMOUNT'          'R'   abap_on   'Amount'            abap_false  '',
+*    'WAERS'           'L'   abap_on   'Crcy'              abap_false  '',
+*    'KPEIN'           'R'   abap_on   'per'               abap_false  '',
+*    'KMEIN'           'L'   abap_on   'Unit of Measure'   abap_false  '',
+*    'COND_VALUE'      'R'   abap_on   'Condition Value'   abap_false  ''.
+*ENDFORM.
+
+"chú ý 2
 FORM alv_fieldcatalog_conditions CHANGING pt_fieldcat TYPE lvc_t_fcat.
   DATA ls_fcat TYPE lvc_s_fcat.
   REFRESH pt_fieldcat.
 
-  " --- Macro ĐỒNG BỘ (giống hệt Item Details) ---
-  " &1 = Fieldname, &2 = Just, &3 = Col_Opt, &4 = Coltext, &5 = Fix_Col, &6 = Edit_Mask
+  " --- Macro ĐỒNG BỘ ---
   DEFINE _add_fieldcat.
     CLEAR ls_fcat.
     ls_fcat-fieldname   = &1.
@@ -2514,37 +2332,48 @@ FORM alv_fieldcatalog_conditions CHANGING pt_fieldcat TYPE lvc_t_fcat.
     ls_fcat-scrtext_m   = &4.
     ls_fcat-scrtext_s   = &4.
     ls_fcat-fix_column  = &5.
-    ls_fcat-ref_table   = 'ZTB_SO_COND_SING'. " <<< Dùng Z-table mới
-    ls_fcat-ref_field   = &1.
     ls_fcat-edit_mask   = &6.
 
-    " (Không cần no_convext cho KSCHL)
+    " 1. Mặc định tham chiếu Z-Table
+    ls_fcat-ref_table   = 'ZTB_SO_COND_SING'.
+    ls_fcat-ref_field   = &1.
 
-    " === Logic Edit (Chỉ cho nhập Amount) ===
+    " 2. Xử lý logic riêng
     CASE &1.
-*      WHEN 'AMOUNT'. " Chỉ cho phép sửa cột Amount
-*        ls_fcat-edit = abap_true.
+      " --- Nhóm Tiền tệ ---
+      WHEN 'AMOUNT' OR 'KWERT'.
+        ls_fcat-cfieldname = 'WAERS'.
+
+        IF &1 = 'KWERT'.
+          CLEAR: ls_fcat-ref_table, ls_fcat-ref_field.
+          " [ĐÃ XÓA]: ls_fcat-do_sum = 'X'. -> Không tính tổng nữa
+        ENDIF.
+
+      " --- Nhóm Helper ---
+      WHEN 'ICON' OR 'VTEXT' OR 'CELL_STYLE'.
+        CLEAR: ls_fcat-ref_table, ls_fcat-ref_field.
+
       WHEN OTHERS.
-        ls_fcat-edit = abap_false.
+        " Giữ nguyên
     ENDCASE.
 
     APPEND ls_fcat TO pt_fieldcat.
   END-OF-DEFINITION.
 
-  " --- Fieldname         Just  Opt       Coltext             FixCol      EditMask
+  " --- Fieldname    Just  Opt       Coltext              FixCol      EditMask
   _add_fieldcat:
-    'ICON'            'C'   abap_on   'Inactive'          abap_false  '',
-    'KSCHL'           'L'   abap_on   'CnTy'              abap_false  '',
-    'VTEXT'           'L'   abap_on   'Description'       abap_false  '',
-    'AMOUNT'          'R'   abap_on   'Amount'            abap_false  '',
-    'WAERS'           'L'   abap_on   'Crcy'              abap_false  '',
-    'KPEIN'           'R'   abap_on   'per'               abap_false  '',
-    'KMEIN'           'L'   abap_on   'Unit of Measure'   abap_false  '',
-    'COND_VALUE'      'R'   abap_on   'Condition Value'   abap_false  ''.
+    'ICON'           'C'   abap_on   'Status'             abap_false  '',
+    'KSCHL'          'L'   abap_on   'Cond. Type'         abap_false  '',
+    'VTEXT'          'L'   abap_on   'Description'        abap_false  '',
+    'AMOUNT'         'R'   abap_on   'Amount'             abap_false  '',
+    'WAERS'          'L'   abap_on   'Curr.'              abap_false  '',
+    'KPEIN'          'R'   abap_on   'Per'                abap_false  '',
+    'KMEIN'          'L'   abap_on   'UoM'                abap_false  '',
+    'KWERT'          'R'   abap_on   'Cond. Value'        abap_false  ''.
+
 ENDFORM.
-*&---------------------------------------------------------------------*
-*& Form BUILD_CONDITIONS_ALV (Đồng bộ với Item Details)
-*&---------------------------------------------------------------------*
+
+"chú ý 2
 FORM build_conditions_alv.
 
   " 1. Tạo Container (CHỈ 1 LẦN)
@@ -2717,51 +2546,6 @@ FORM set_dropdown_monitoring_status.
       values = lt_values.
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form SET_DROPDOWN_Tracking_STATUS (Cho Screen 500)
-*&---------------------------------------------------------------------*
-*FORM set_dropdown_process_phase.
-*  DATA: lt_values TYPE vrm_values,
-*        ls_value  TYPE vrm_value.
-*
-*  CLEAR lt_values.
-*
-**  " SỬA: Thêm một dòng trống (Key là 'ALL' hoặc SPACE)
-**  ls_value-key  = 'ALL'.
-**  ls_value-text = ' '. " <== Chỉ để một khoảng trắng
-**  APPEND ls_value TO lt_values.
-*
-*  " Thêm các Phase
-*  ls_value-key  = 'ALL'. ls_value-text = 'All'. APPEND ls_value TO lt_values.
-*  ls_value-key  = 'ORD'. ls_value-text = 'Order processing'. APPEND ls_value TO lt_values.
-*  ls_value-key  = 'DEL'. ls_value-text = 'Delivery processing'. APPEND ls_value TO lt_values.
-*  ls_value-key  = 'INV'. ls_value-text = 'Invoice processing'. APPEND ls_value TO lt_values.
-*  ls_value-key  = 'ACC'. ls_value-text = 'Accounting'. APPEND ls_value TO lt_values.
-*
-*  CALL FUNCTION 'VRM_SET_VALUES'
-*    EXPORTING
-*      id     = 'CB_PHASE'
-*      values = lt_values.
-*ENDFORM.
-
-FORM set_dropdown_process_phase.
-  DATA: lt_values TYPE vrm_values,
-        ls_value  TYPE vrm_value.
-
-  CLEAR lt_values.
-
-  " Thêm các Phase
-  ls_value-key  = 'ALL'. ls_value-text = 'All'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'ORD'. ls_value-text = 'Order created'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'DEL'. ls_value-text = 'Delivery created , ready PGI'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'INV'. ls_value-text = 'PGI posted, ready Billing'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'ACC'. ls_value-text = 'FI Doc created'. APPEND ls_value TO lt_values.
-
-  CALL FUNCTION 'VRM_SET_VALUES'
-    EXPORTING
-      id     = 'CB_PHASE'
-      values = lt_values.
-ENDFORM.
 
 FORM set_dropdown_sales_status.
   DATA: lt_values TYPE vrm_values,
@@ -2771,8 +2555,6 @@ FORM set_dropdown_sales_status.
   ls_value-key  = 'ALL'. ls_value-text = 'All'. APPEND ls_value TO lt_values.
   ls_value-key  = 'INC'. ls_value-text = 'Order Incomplete'. APPEND ls_value TO lt_values.
   ls_value-key  = 'COM'. ls_value-text = 'Order Complete'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'BLK'. ls_value-text = 'Billing Block'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'REJ'. ls_value-text = 'Rejected'. APPEND ls_value TO lt_values.
 
   CALL FUNCTION 'VRM_SET_VALUES'
     EXPORTING
@@ -2780,100 +2562,78 @@ FORM set_dropdown_sales_status.
       values = lt_values.
 ENDFORM.
 
+
+FORM set_dropdown_process_phase.
+  DATA: lt_values TYPE vrm_values,
+        ls_value  TYPE vrm_value.
+
+  CLEAR lt_values.
+  ls_value-key = 'ALL'. ls_value-text = 'All'. APPEND ls_value TO lt_values.
+
+  " 1. Order created (Đã gộp chung cho cả Standard & ZDR)
+  ls_value-key = 'ORD'. ls_value-text = 'Order created'. APPEND ls_value TO lt_values.
+
+  " (Đã xóa dòng ORB ở đây)
+
+  " 2. Delivery created (Đã gộp chung cho Delivery & Return)
+  ls_value-key = 'DEL'. ls_value-text = 'Delivery created, ready PGI/PGR'. APPEND ls_value TO lt_values.
+
+  " 3. PGI/PGR
+  ls_value-key = 'INV'. ls_value-text = 'PGI/PGR Posted, ready Billing'. APPEND ls_value TO lt_values.
+
+  " 4. Billing & FI
+  ls_value-key = 'BIL'. ls_value-text = 'Billing created'. APPEND ls_value TO lt_values.
+  ls_value-key = 'ACC'. ls_value-text = 'FI Doc created'. APPEND ls_value TO lt_values.
+
+  CALL FUNCTION 'VRM_SET_VALUES'
+    EXPORTING id = 'CB_PHASE' values = lt_values.
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  SET_DROPDOWN_DELIVERY_STATUS
+*&---------------------------------------------------------------------*
 FORM set_dropdown_delivery_status.
   DATA: lt_values TYPE vrm_values,
         ls_value  TYPE vrm_value.
 
   CLEAR lt_values.
-  ls_value-key  = 'ALL'. ls_value-text = 'All'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'GRP'. ls_value-text = 'GR Posted'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'PGI'.  ls_value-text = 'GI Posted'. APPEND ls_value TO lt_values.
+  ls_value-key  = 'ALL'.   ls_value-text = 'All'. APPEND ls_value TO lt_values.
+
+  " [GỘP]: Text chung cho cả Return và Standard
+  ls_value-key  = 'READY'. ls_value-text = 'Delivery created, ready PGI/PGR'. APPEND ls_value TO lt_values.
+
+  ls_value-key  = 'POST'.  ls_value-text = 'GI/GR Posted'. APPEND ls_value TO lt_values.
 
   CALL FUNCTION 'VRM_SET_VALUES'
-    EXPORTING
-      id     = 'CB_DDSTA'
-      values = lt_values.
+    EXPORTING id = 'CB_DDSTA' values = lt_values.
 ENDFORM.
 
+*&---------------------------------------------------------------------*
+*&      Form  SET_DROPDOWN_BILLING_STATUS
+*&---------------------------------------------------------------------*
 FORM set_dropdown_billing_status.
   DATA: lt_values TYPE vrm_values,
         ls_value  TYPE vrm_value.
 
   CLEAR lt_values.
-  ls_value-key  = 'ALL'. ls_value-text = 'All'. APPEND ls_value TO lt_values.
-  ls_value-key  = 'OPEN'. ls_value-text = 'Open'. APPEND ls_value TO lt_values.
+  ls_value-key  = 'ALL'.  ls_value-text = 'All'.       APPEND ls_value TO lt_values.
+
+  " --- [SỬA]: Đổi text OPEN đúng theo yêu cầu ---
+  ls_value-key  = 'OPEN'. ls_value-text = 'Billing created, no FI doc'. APPEND ls_value TO lt_values.
+
   ls_value-key  = 'CANC'. ls_value-text = 'Cancelled'. APPEND ls_value TO lt_values.
   ls_value-key  = 'COMP'. ls_value-text = 'Completed'. APPEND ls_value TO lt_values.
+
   CALL FUNCTION 'VRM_SET_VALUES'
     EXPORTING
       id     = 'CB_BDSTA'
       values = lt_values.
 ENDFORM.
 
-FORM    alv_prepare.
-*  CLEAR: gt_fcat, gs_layout.
-*
-*  gs_layout-zebra      = abap_true.
-*  gs_layout-cwidth_opt = abap_true.
-*  gs_layout-grid_title = 'Sales Document Tracking'.
-*
-*  " BÁO ALV DÙNG CHECKBOX HỆ THỐNG:
-*  gs_layout-box_fname  = 'SEL_BOX'. " Tên trường data để lưu 'X'
-*  gs_layout-sel_mode   = 'D'.       " Cho phép chọn nhiều
-*
-*  DEFINE add_field.
-*    APPEND VALUE lvc_s_fcat(
-*      fieldname = &1
-*      coltext   = &2
-*      outputlen = &3
-*      edit      = &4
-*    ) TO gt_fcat.
-*  END-OF-DEFINITION.
-*  "============================================
-*  " THÊM MỚI: XÓA CÁC NÚT KHÔNG CẦN THIẾT
-*  "============================================
-*  " Xóa nút 'Find next' (Tìm kiếm nâng cao)
-*  APPEND cl_gui_alv_grid=>mc_fc_find_more TO gt_exclude.
-*  " Xóa nút 'Subtotal' (Tổng phụ)
-*  APPEND cl_gui_alv_grid=>mc_fc_subtot TO gt_exclude.
-*  " Xóa nút 'Information' (Thông tin)
-*  APPEND cl_gui_alv_grid=>mc_fc_info TO gt_exclude.
-*  " Xóa nút 'Views' (Giao diện) - (Nút này khác với 'Layout')
-*  APPEND cl_gui_alv_grid=>mc_fc_views TO gt_exclude.
-*  " XÓA DÒNG NÀY ĐI:
-*  " add_field 'SEL_BOX' '' 1 abap_true. " <== XÓA BỎ
-*
-*  "============================================
-*  " BẮT ĐẦU SỬA: Thêm Icon
-*  "============================================
-*
-*  " 1. Thêm trường icon (không cần tiêu đề, không edit)
-*  add_field 'PHASE_ICON' '' 4 abap_false.
-*
-*  add_field 'PROCESS_PHASE'   'Process Phase'      20 abap_false.
-*  add_field 'SALES_DOCUMENT'   'Sales Documents'       12 abap_false.
-*  add_field 'ORDER_TYPE'        'Sales Order Type'    4  abap_false.
-*  add_field 'DOCUMENT_DATE'     'Document Date'       10 abap_false.
-*  add_field 'SOLD_TO_PARTY'     'Sold-to Party'       10 abap_false.
-*  add_field 'SALES_ORG'         'Sales Org'           4  abap_false.
-*  add_field 'DISTR_CHAN'        'Dist. Channel'       2  abap_false.
-*  add_field 'DIVISION'          'Division'            2  abap_false.
-*  add_field 'DELIVERY_DOCUMENT' 'Delivery Documents' 12 abap_false.
-*  add_field 'REQ_DELIVERY_DATE' 'Requested Delivery Date' 10 abap_false.
-*  add_field 'BILLING_DOCUMENT'  'Billing Documents'   12 abap_false.
-*  add_field 'NET_VALUE'         'Net Value'           15 abap_false.
-*  add_field 'CURRENCY'          'Currency'            5  abap_false.
-*  add_field 'ERROR_MSG'         'BAPI Message'       50 abap_false.
-*  " 3. Báo cho ALV biết 'PHASE_ICON' là một icon
-*  DATA: ls_fcat_icon TYPE lvc_s_fcat.
-*  READ TABLE gt_fcat WITH KEY fieldname = 'PHASE_ICON'
-*                     INTO ls_fcat_icon.
-*  IF sy-subrc = 0.
-*    ls_fcat_icon-icon = abap_true. " <== ĐÁNH DẤU LÀ ICON
-*    MODIFY gt_fcat FROM ls_fcat_icon INDEX sy-tabix.
-*  ENDIF.
 
-    CLEAR: gt_fcat, gs_layout.
+
+FORM alv_prepare.
+  CLEAR: gt_fcat, gs_layout.
 
   gs_layout-zebra      = abap_true.
   gs_layout-cwidth_opt = abap_true.
@@ -2882,12 +2642,8 @@ FORM    alv_prepare.
   " BÁO ALV DÙNG CHECKBOX HỆ THỐNG:
   gs_layout-box_fname  = 'SEL_BOX'. " Tên trường data để lưu 'X'
   gs_layout-sel_mode   = 'D'.       " Cho phép chọn nhiều
-
-  "============================================
-  " SỬA: BẬT TÍNH NĂNG GỘP Ô (MERGE CELL)
-  "============================================
   gs_layout-no_merging = space. " <== QUAN TRỌNG: Để cột Sales Doc tự gộp lại
-  "============================================
+  gs_layout-no_toolbar = 'X'.
 
   DEFINE add_field.
     APPEND VALUE lvc_s_fcat(
@@ -2918,8 +2674,6 @@ FORM    alv_prepare.
   add_field 'RELEASE_FLAG'  '' 4 abap_false.
   add_field 'PROCESS_PHASE' 'Process Phase'       20 abap_false.
   add_field 'SALES_DOCUMENT' 'Sales Documents'    12 abap_false.
-
-
   add_field 'ORDER_TYPE'        'Sales Order Type'    4  abap_false.
   add_field 'DOCUMENT_DATE'     'Document Date'       10 abap_false.
   add_field 'SOLD_TO_PARTY'     'Sold-to Party'       10 abap_false.
@@ -2932,18 +2686,9 @@ FORM    alv_prepare.
   add_field 'NET_VALUE'         'Net Value'           15 abap_false.
   add_field 'CURRENCY'          'Currency'            5  abap_false.
   " add_field 'ERROR_MSG'         'BAPI Message'       50 abap_false.
-
-  "============================================
-  "=== BẮT ĐẦU THÊM 3 CỘT MỚI (FI/CANCEL)
-  "============================================
   add_field 'FI_DOC_BILLING'    'FI for Billing Doc'   12 abap_false.
   add_field 'BILL_DOC_CANCEL'   'Billing Cancelled doc'  12 abap_false.
   add_field 'FI_DOC_CANCEL'     'FI for cancel billing Doc' 12 abap_false.
-  "============================================
-
-  "============================================
-  "=== CẤU HÌNH LẠI CÁC CỘT ĐẶC BIỆT
-  "============================================
 
   " 1. Xử lý RELEASE_FLAG (Hotspot)
   DATA: ls_fcat_release TYPE lvc_s_fcat.
@@ -2973,10 +2718,6 @@ FORM    alv_prepare.
     ls_fcat_so-key       = abap_true. " Cột khóa (để không cuộn ngang và hỗ trợ merge)
     MODIFY gt_fcat FROM ls_fcat_so INDEX sy-tabix.
   ENDIF.
-  "============================================
-  " KẾT THÚC SỬA
-  "============================================
-
 
   " <<< THÊM MỚI TỪ ĐÂY >>>
   " 4. Báo cho ALV biết 'DELIVERY_DOCUMENT' là một Hotspot
@@ -2990,7 +2731,6 @@ FORM    alv_prepare.
   " <<< KẾT THÚC THÊM MỚI >>>
 
 ENDFORM.
-
 
 *&---------------------------------------------------------------------*
 *& Form ALV_FIELDCATALOG_PGI_ALL (Tab 1)
@@ -3045,51 +2785,6 @@ FORM alv_fieldcatalog_pgi_all CHANGING pt_fieldcat TYPE lvc_t_fcat.
     'XCHPF'           'C'   abap_on   'Batch split in'       abap_false  '',
     'KDMAT'           'L'   abap_on   'Customer material number' abap_false  ''.
 ENDFORM.
-
-**&---------------------------------------------------------------------*
-**& Form ALV_FIELDCATALOG_PGI_PROC (Tab 2)
-**&---------------------------------------------------------------------*
-*FORM alv_fieldcatalog_pgi_proc CHANGING pt_fieldcat TYPE lvc_t_fcat.
-*  DATA ls_fcat TYPE lvc_s_fcat.
-*  REFRESH pt_fieldcat.
-*  " (Dùng Macro chuẩn của bạn)
-*  DEFINE _add_fieldcat.
-*    CLEAR ls_fcat.
-*    ls_fcat-edit        = COND #( WHEN gv_pgi_edit_mode = abap_true THEN 'X' ELSE space ).
-*    ls_fcat-fieldname   = &1.
-*    ls_fcat-just        = &2.
-*    ls_fcat-col_opt     = &3.
-*    ls_fcat-coltext     = &4.
-*    ls_fcat-seltext     = &4.
-*    ls_fcat-tooltip     = &4.
-*    ls_fcat-scrtext_l   = &4.
-*    ls_fcat-scrtext_m   = &4.
-*    ls_fcat-scrtext_s   = &4.
-*    ls_fcat-fix_column  = &5.
-*    ls_fcat-ref_table   = 'ZTB_PGI_PROCESS'. " <<< Tên Z-Table của bạn
-*    ls_fcat-ref_field   = &1.
-*    ls_fcat-edit_mask   = &6.
-*    APPEND ls_fcat TO pt_fieldcat.
-*  END-OF-DEFINITION.
-*  " Fieldname         Just  Opt       Coltext                FixCol      EditMask
-*  _add_fieldcat:
-*    'POSNR'           'R'   abap_on   'Item'                 abap_false  '',
-*    'MATNR'           'L'   abap_on   'Material'             abap_false  '',
-*    'ARKTX'           'L'   abap_on   'Description'          abap_false  '',
-*    'WERKS'           'L'   abap_on   'Plant'                abap_false  '',
-*    'VTWEG'           'L'   abap_on   'Dist. Channel'        abap_false  '',
-*    'SPART'           'L'   abap_on   'Division'             abap_false  '',
-*    'LGORT'           'L'   abap_on   'Storage Location'     abap_false  '',
-*    'LGPBE'           'L'   abap_on   'Storage Bin'          abap_false  '',
-*    'CHARG'           'L'   abap_on   'Batch'                abap_false  '',
-*    'KOSTA'           'C'   abap_on   'Picking Status'       abap_false  '',
-*    'PKSTA'           'C'   abap_on   'Packing Status'       abap_false  '',
-*    'WBSTA'           'C'   abap_on   'Good Issue Status'    abap_false  '',
-*    'FKREL'           'C'   abap_on   'Deliv.Rel.Billg Sts'  abap_false  '',
-*    'LADGR'           'L'   abap_on   'Loading Group'        abap_false  '',
-*    'BWART'           'L'   abap_on   'Movement Type'        abap_false  '',
-*    'TEXT'            'L'   abap_on   'Text'                 abap_false  ''.
-*ENDFORM.
 
 
 *&---------------------------------------------------------------------*

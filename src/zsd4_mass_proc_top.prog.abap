@@ -9,6 +9,11 @@ TYPE-POOLS: BAPISD.
 DATA: gv_upload_type     TYPE c LENGTH 1,  " S = Single, M = Mass
       gv_management_type TYPE c LENGTH 1.  " T = Tracking, R = Report
 
+DATA: gv_single_mode TYPE char10. " Biến chứa chế độ: 'CREATE' hoặc 'EDIT'
+DATA: gv_data_saved  TYPE char1.  " Cờ báo hiệu: 'X' nếu Save thành công, '' nếu thất bại
+
+DATA: gv_order_type TYPE auart. " Biến lưu loại đơn hàng (ZORR, ZFOC...)
+
 " --- Biến Đếm cho Validation Summary (MỚI) ---
 DATA: gv_cnt_val_ready   TYPE i, " Đếm số dòng Ready trong tab Validated
       gv_cnt_val_incomp  TYPE i, " Đếm số dòng Incomplete trong tab Validated
@@ -263,16 +268,23 @@ TYPES ty_t_item_details TYPE STANDARD TABLE OF ty_item_details WITH DEFAULT KEY.
 
 " --- [SỬA] Cấu trúc cho ALV Conditions (Giống Item Details) ---
 TYPES: BEGIN OF ty_cond_alv.
-         " 1. Bao gồm tất cả các trường từ Z-table
-         INCLUDE TYPE ztb_so_cond_sing.
-         " 2. Thêm các trường ALV-helper (không có trong DB)
-  TYPES:   icon        TYPE icon-internal,
-           status_code TYPE c LENGTH 1,
-           status_text TYPE char20,
-           message     TYPE string,
-           style       TYPE lvc_t_styl,
-           celltab     TYPE lvc_t_scol,  " Để xử lý màu ô (tránh lỗi GETWA_NOT_ASSIGNED)
-           rowcolor    TYPE char4.       " Để xử lý màu dòng
+        " --- A. Các trường lấy từ Database (ZTB_SO_COND_SING) ---
+        INCLUDE TYPE ztb_so_cond_sing.
+        " (Gồm: REQ_ID, ITEM_NO, KSCHL, AMOUNT, WAERS, KPEIN, KMEIN...)
+
+        " --- B. Các trường bổ sung cho logic tính toán & hiển thị ---
+        TYPES:
+          kwert       TYPE kwert,        " [QUAN TRỌNG] Thành tiền (Amount * Qty)
+
+          " --- C. Các trường Helper của ALV ---
+          icon        TYPE icon-internal,
+          status_code TYPE c LENGTH 1,
+          status_text TYPE char20,
+          message     TYPE string,
+
+          cell_style  TYPE lvc_t_styl,   " [ĐỔI TÊN]: Từ 'style' -> 'cell_style' để khớp logic code
+          celltab     TYPE lvc_t_scol,   " Màu ô
+          rowcolor    TYPE char4.        " Màu dòng
 TYPES: END OF ty_cond_alv.
 TYPES: ty_t_cond_alv TYPE STANDARD TABLE OF ty_cond_alv WITH DEFAULT KEY.
 
@@ -283,6 +295,16 @@ DATA: gt_fcat_header TYPE lvc_t_fcat,
       gt_fcat_item   TYPE lvc_t_fcat,
       gt_fcat_cond   TYPE lvc_t_fcat. " [MỚI] Cho Condition
 
+
+" 1. Định nghĩa kiểu dữ liệu cho bảng Cache
+TYPES: BEGIN OF ty_cond_cache,
+         item_no    TYPE posnr_va,      " Khóa chính: Số Item
+         conditions TYPE ty_t_cond_alv,  " Bảng chứa các dòng Condition (ZPRQ, ZDRP...)
+       END OF ty_cond_cache.
+
+" 2. Khai báo biến Global
+DATA: gt_cond_cache TYPE HASHED TABLE OF ty_cond_cache
+                    WITH UNIQUE KEY item_no.
 
 *===== Raw & globals =====
 TYPES: BEGIN OF ty_rawdata,
@@ -733,25 +755,6 @@ DATA:
 "==========================================================
 "   ALV Tracking Structure
 "==========================================================
-*TYPES: BEGIN OF ty_tracking,
-*         process_phase       TYPE char30,
-*         sales_document      TYPE vbeln_va,
-*         delivery_document   TYPE vbeln_vl,
-*         billing_document    TYPE vbeln_vf,
-*         order_type          TYPE auart,
-*         document_date       TYPE erdat,
-*         sales_org           TYPE vkorg,
-*         distr_chan          TYPE vtweg,
-*         division            TYPE spart,
-*         sold_to_party       TYPE kunnr,
-*         net_value           TYPE netwr,
-*         currency            TYPE waers,
-*         req_delivery_date   TYPE edatu,
-*         error_msg           TYPE string,
-*         created_by          TYPE ernam,
-*         phase_icon          TYPE icon_d,
-*         sel_box             TYPE c LENGTH 1,
-*       END OF ty_tracking.
 
 TYPES: BEGIN OF ty_tracking,
          process_phase     TYPE char30,
@@ -846,10 +849,44 @@ DATA:
 DATA: gv_jobname TYPE tbtcjob-jobname VALUE 'Z_AUTO_DELIV_PROTOTYPE'.
 
 DATA: gv_sarea TYPE char20. " Biến gộp cho Sales Area
+
+
+" Thêm dòng này vào TRƯỚC dòng DATA
+CLASS lcl_event_handler1 DEFINITION DEFERRED.
+
+" Dòng code cũ của bạn
+DATA: gr_event_handler1 TYPE REF TO lcl_event_handler1.
 DATA:
   gv_deliv TYPE vbeln_vl, " Delivery Document for Search
   gv_bill  TYPE vbeln_vf. " Billing Document for Search
+*----------------------------------------------------------------------*
+* CLASS lcl_event_handler DEFINITION
+*----------------------------------------------------------------------*
+CLASS lcl_event_handler1 DEFINITION.
+  PUBLIC SECTION.
+    METHODS:
+      handle_double_click
+        FOR EVENT double_click OF cl_gui_alv_grid
+        IMPORTING e_row e_column es_row_no.
+ENDCLASS.
 
+*----------------------------------------------------------------------*
+* CLASS lcl_event_handler IMPLEMENTATION
+*----------------------------------------------------------------------*
+CLASS lcl_event_handler1 IMPLEMENTATION.
+  METHOD handle_double_click.
+    " --- [FIX LỖI] ---
+    " Khai báo biến trung gian để hứng index
+    DATA: lv_index TYPE i.
+
+    " Chuyển giá trị từ e_row-index sang biến kiểu Integer
+    lv_index = e_row-index.
+
+    " Truyền biến lv_index vào FORM (lúc này kiểu dữ liệu đã khớp)
+    PERFORM show_document_flow_popup USING lv_index.
+    " -----------------
+  ENDMETHOD.
+ENDCLASS.
 
 " <<< THÊM MỚI: Cấu trúc cho Error Log Popup (PGI) >>>
 TYPES: BEGIN OF ty_error_log,
@@ -874,1075 +911,12 @@ CONTROLS: TAB_MAIN TYPE TABSTRIP.
 * Khai báo biến này với một độ dài đủ để chứa Fcode của tab.
 DATA: G_CURRSU_TAB TYPE CHAR10 VALUE 'FITEM'. " TAB1 là Fcode của tab Item
 
-
-**&---------------------------------------------------------------------*
-**&  BLOCK 5 – CLASS lcl_event_handler
-**&  Event Handler for all ALV grids in the program
-**&---------------------------------------------------------------------*
-*
-*CLASS lcl_event_handler DEFINITION.
-*  PUBLIC SECTION.
-*
-*    " Constructor: Gắn grid + table nội bộ
-*    METHODS: constructor
-*        IMPORTING
-*          io_grid  TYPE REF TO cl_gui_alv_grid    " Grid cần bắt event
-*          it_table TYPE REF TO data.              " Table làm nguồn dữ liệu
-*
-*    " Khi người dùng nhấn nút (button) trên ALV toolbar
-*    METHODS: handle_user_command
-*        FOR EVENT user_command OF cl_gui_alv_grid
-*        IMPORTING e_ucomm.
-*
-*    " Tùy biến toolbar: thêm, ẩn, disable nút
-*    METHODS: handle_toolbar
-*        FOR EVENT toolbar OF cl_gui_alv_grid
-*        IMPORTING e_object e_interactive.
-*
-*    " Khi người dùng thay đổi dữ liệu trong ALV (live edit)
-*    METHODS: handle_data_changed
-*        FOR EVENT data_changed OF cl_gui_alv_grid
-*        IMPORTING er_data_changed.
-*
-*    " Sau khi hệ thống xử lý xong thay đổi data_changed
-*    METHODS: handle_data_changed_finished
-*        FOR EVENT data_changed_finished OF cl_gui_alv_grid
-*        IMPORTING e_modified et_good_cells.
-*
-*    " Khi người dùng click vào cell có hotspot (icon xem lỗi, item drilldown…)
-*    METHODS: handle_hotspot_click
-*        FOR EVENT hotspot_click OF cl_gui_alv_grid
-*        IMPORTING e_row_id e_column_id es_row_no.
-*
-*  PRIVATE SECTION.
-*    DATA:
-*      mo_grid  TYPE REF TO cl_gui_alv_grid,   " Grid ALV tương ứng
-*      mt_table TYPE REF TO data.              " Nội dung data tương ứng
-*ENDCLASS.
-*
-*
-**&---------------------------------------------------------------------*
-**&  BLOCK 1 – TYPE POOLS + GLOBAL MODE FLAGS + SCREEN STATE
-**&---------------------------------------------------------------------*
-*
-*"-------------------------------------------------------------*
-*" TYPE-POOLS: Import các định nghĩa type chuẩn của SAP
-*"-------------------------------------------------------------*
-*TYPE-POOLS: slis.      " SLIS: Dùng cho field catalog kiểu cũ (REUSE_ALV...)
-*TYPE-POOLS: bapisd.    " BAPISD: Chứa type của BAPI Sales Order (BAPI_SALESORDER*)
-*
-*"-------------------------------------------------------------*
-*" GLOBAL FLAGS – Xác định chế độ hệ thống đang chạy
-*"-------------------------------------------------------------*
-*DATA: gv_upload_type TYPE c LENGTH 1,     " S = Create Single SO, M = Mass Upload
-*      gv_management_type TYPE c LENGTH 1. " T = Tracking, R = Report dashboard
-*
-*"-------------------------------------------------------------*
-*" SCREEN FLAGS – Quản lý trạng thái nhập liệu chính của screen
-*"-------------------------------------------------------------*
-*DATA: gv_screen_state TYPE c VALUE '0'.
-*" 0 = User vừa vào màn hình (no Sold-to yet)
-*" 1 = Đã nhập xong Sold-to → cho phép nhập thêm Item, Conditions…
-*
-*DATA: gv_so_just_created TYPE abap_bool.
-*" 'X' = Vừa tạo Sales Order thành công (Single Upload)
-*" Dùng để trigger refresh tab / popup thành công
-*
-*"-------------------------------------------------------------*
-*" REQUEST ID – Dùng để trace 1 lần upload → lưu vào bảng staging/log
-*"-------------------------------------------------------------*
-*DATA gv_req_id TYPE zsd_req_id.           " Req_ID được generate khi user upload file
-*DATA gv_current_req_id TYPE zsd_req_id.   " Lưu Req_ID hiện tại suốt chương trình
-*
-*"-------------------------------------------------------------*
-*" FIRST RUN – Kiểm tra chương trình chạy lần đầu
-*"-------------------------------------------------------------*
-*DATA gv_first_run TYPE c VALUE 'X'.
-*" X = Run lần đầu → Load các cấu hình ban đầu (tips, layout…)
-*
-*"-------------------------------------------------------------*
-*" DATA LOADED FLAG – Kiểm tra đã load file chưa
-*"-------------------------------------------------------------*
-*DATA gv_data_loaded TYPE abap_bool.
-*" 'X' = W đã upload file Excel thành công
-*" Dùng để enable/disable các nút (Validate, Clear, Save...)
-*
-*"-------------------------------------------------------------*
-*" OK-CODE – Biến nhận function code từ UI (PBO/PAI)
-*"-------------------------------------------------------------*
-*DATA ok_code TYPE sy-ucomm.
-*
-*"-------------------------------------------------------------*
-*" RADIO BUTTON FLAGS – Dùng trong màn hình chọn chế độ xử lý
-*"-------------------------------------------------------------*
-*DATA: rb_single TYPE abap_bool,   " Single Sales Order mode
-*      rb_mass   TYPE abap_bool,   " Mass Upload mode
-*      rb_status TYPE abap_bool,   " Status checking mode (VA05-like)
-*      rb_remon  TYPE abap_bool.   " Remote Monitoring (bổ sung nếu có)
-*
-*"-------------------------------------------------------------*
-*" QUICK TIPS – Hiển thị hướng dẫn (UI feature)
-*"-------------------------------------------------------------*
-*DATA: lt_tips  TYPE STANDARD TABLE OF string,  " Danh sách câu tips
-*      tip_text TYPE string,                    " 1 tip đơn lẻ
-*      gv_hello_text TYPE string.               " Lời chào tùy biến trên screen
-*
-**&---------------------------------------------------------------------*
-**&  BLOCK 2 – VALIDATION SUMMARY COUNTERS
-**&---------------------------------------------------------------------*
-*" Các biến thống kê số dòng theo trạng thái, hiển thị trên Validation Summary
-*" dùng cho UI trong màn hình Mass Upload (Tab Validated / Success / Failed)
-*
-*"======================================================================
-*" 1. COUNTS FOR VALIDATED TAB – Sau khi chạy VALIDATE TEMPLATE + VALIDATE DATA
-*"======================================================================
-*
-*DATA: gv_cnt_val_ready   TYPE i,
-*      " Số header/item có trạng thái READY TO POST
-*      " (Validate thành công – có thể SAVE TO STAGING hoặc CREATE SO)
-*
-*      gv_cnt_val_incomp  TYPE i,
-*      " Số dòng bị INCOMPLETE – thiếu dữ liệu bắt buộc
-*      " Xuất hiện trong Validation Summary màu vàng
-*
-*      gv_cnt_val_err     TYPE i.
-*      " Số dòng ERROR – sai format, sai master data, pricing sai…
-*      " Xuất hiện trong Validation Summary màu đỏ
-*
-*
-*"======================================================================
-*" 2. COUNTS FOR SUCCESS TAB – Sau khi CREATE SALES ORDER thành công
-*"======================================================================
-*
-*DATA: gv_cnt_suc_comp    TYPE i,
-*      " Số dòng COMPLETE – SO tạo thành công + Delivery (nếu auto-delivery)
-*
-*      gv_cnt_suc_incomp  TYPE i.
-*      " Số dòng lập được Sales Order nhưng INCOMPLETE (thiếu data VA02)
-*      " Thường xảy ra khi master data thiếu hoặc pricing chưa đầy đủ
-*
-*
-*"======================================================================
-*" 3. COUNTS FOR FAILED TAB – SO CREATION FAILED (BAPI trả về E/M)
-*"======================================================================
-*
-*DATA: gv_cnt_fail_err    TYPE i.
-*      " Số dòng FAILED (BAPI_SALESORDER_CREATEFROMDAT2 trả về ERROR)
-*      " Dòng này được move sang Tab 'Failed' cùng thông báo lỗi cụ thể
-*
-*
-*"======================================================================
-*" 4. Tổng số dòng (Header / Item / Condition) – dùng để hiển thị footer
-*"======================================================================
-*
-*DATA: gv_cnt_h_tot       TYPE i,
-*      " Tổng số dòng HEADER của toàn bộ file upload
-*
-*      gv_cnt_i_tot       TYPE i,
-*      " Tổng số ITEM
-*
-*      gv_cnt_c_tot       TYPE i.
-*      " Tổng số CONDITION (pricing) – nếu có sheet Pricing riêng
-*
-*
-*"======================================================================
-*" 5. Item counts trong từng tab – dùng cho thống kê chi tiết Item
-*"======================================================================
-*
-*DATA: gv_cnt_i_val       TYPE i,
-*      " Số dòng Item ở tab Validated (Ready + Incomplete + Error)
-*
-*      gv_cnt_i_suc       TYPE i,
-*      " Số dòng Item thuộc các SO được tạo thành công (Success tab)
-*
-*      gv_cnt_i_fail      TYPE i.
-*      " Item của SO bị lỗi (Failed tab)
-*
-*
-*"======================================================================
-*" 6. Condition counts – tương tự Item nhưng cho Pricing tab
-*"======================================================================
-*
-*DATA: gv_cnt_c_val       TYPE i,
-*      " Số điều kiện giá (ZPRQ, ZXXX…) sau Validate
-*
-*      gv_cnt_c_suc       TYPE i,
-*      " Conditions thuộc SO tạo thành công
-*
-*      gv_cnt_c_fail      TYPE i.
-*      " Conditions thuộc SO bị lỗi
-*
-**&---------------------------------------------------------------------*
-**&  BLOCK 3 – MAIN UI OBJECTS (DOCKING, TABSTRIPS, CONTAINERS)
-**&---------------------------------------------------------------------*
-*
-*"======================================================================
-*" 1. DOCKING CONTAINER – HIỂN THỊ VALIDATION SUMMARY
-*"======================================================================
-*
-*DATA: go_docking_summary TYPE REF TO cl_gui_docking_container.
-*" Docking container đặt bên trái/phải màn hình → giống nhóm kia
-*" Dùng để hiển thị Validation Summary: Ready / Incomplete / Error
-*" Ưu điểm:
-*"   - Tự co giãn theo giao diện (resize)
-*"   - Không cần đặt cố định trong Screen Painter
-*"   - Giữ cố định khi chuyển tab (Validated → Success → Failed)
-*
-*" Đây là container *thay thế* custom container cũ (go_cont_0200).
-*
-*
-*"======================================================================
-*" 2. TABSTRIP CHÍNH – TS_MAIN
-*"======================================================================
-*
-**&SPWIZARD: FUNCTION CODES FOR TABSTRIP 'TS_MAIN'
-*CONSTANTS: BEGIN OF c_ts_main,
-*             tab1 LIKE sy-ucomm VALUE 'TS_MAIN_FC1',   " Tab: Create SO
-*             tab2 LIKE sy-ucomm VALUE 'TS_MAIN_FC2',   " Tab: Tracking/Report
-**             tab3 LIKE sy-ucomm VALUE 'TS_MAIN_FC3',   " (Nếu mở rộng thêm)
-*           END OF c_ts_main.
-*
-*CONTROLS: ts_main TYPE tabstrip.
-*" Tên control phải đúng 100% với Screen Painter (màn hình 0200 hoặc 0100)
-*
-*DATA: BEGIN OF g_ts_main,
-*        subscreen   LIKE sy-dynnr,
-*        prog        LIKE sy-repid VALUE 'ZSD4_MASS_PROC',
-*        pressed_tab LIKE sy-ucomm VALUE c_ts_main-tab1,
-*      END OF g_ts_main.
-*" g_ts_main quyết định: mỗi tab hiển thị subscreen nào
-*" pressed_tab lưu tab hiện tại user đang đứng
-*
-*
-*"======================================================================
-*" 3. TABSTRIP VALIDATION – TS_VALI (Bao gồm 3 TAB: Validated, Success, Failed)
-*"======================================================================
-*
-**&SPWIZARD: FUNCTION CODES FOR TABSTRIP 'TS_VALI'
-*CONSTANTS: BEGIN OF c_ts_vali,
-*             tab1 LIKE sy-ucomm VALUE 'TS_VALI_FC1',   " Tab Validated
-*             tab2 LIKE sy-ucomm VALUE 'TS_VALI_FC2',   " Tab Success
-*             tab3 LIKE sy-ucomm VALUE 'TS_VALI_FC3',   " Tab Failed
-*           END OF c_ts_vali.
-*
-*CONTROLS: ts_vali TYPE tabstrip.
-*
-*DATA: BEGIN OF g_ts_vali,
-*        subscreen   LIKE sy-dynnr,
-*        prog        LIKE sy-repid VALUE 'ZSD4_MASS_PROC',
-*        pressed_tab LIKE sy-ucomm VALUE c_ts_vali-tab1,
-*      END OF g_ts_vali.
-*" TS_VALI xuất hiện trong màn hình Mass Upload (screen 0200)
-*" → Cho phép user xem 3 tab:
-*"     (1) Validated (Ready & Incomplete & Error)
-*"     (2) Success (SO post thành công)
-*"     (3) Failed (SO post thất bại)
-*
-*
-*"======================================================================
-*" 4. MAIN CUSTOM CONTAINERS CHO ALV (Validated / Success / Failed)
-*"======================================================================
-*
-*DATA: go_cont_val  TYPE REF TO cl_gui_custom_container, " Tab Validated
-*      go_cont_suc  TYPE REF TO cl_gui_custom_container, " Tab Success
-*      go_cont_fail TYPE REF TO cl_gui_custom_container. " Tab Failed
-*
-*" Mỗi tab có 3 ALV:
-*"   Header ALV
-*"   Item ALV
-*"   Condition ALV
-*" Do đó cần nhiều grid hơn trong Block 4 & Block 5 (Grid + Event Handler)
-*"
-*" Các container này được đặt trong Screen Painter của subscreen:
-*"   0211 – Validated
-*"   0212 – Success
-*"   0213 – Failed
-*
-*
-*"======================================================================
-*" 5. SINGLE UPLOAD CONTAINER – DÙNG TRONG SCREEN 0110/0113
-*"======================================================================
-*
-*DATA: go_cont_item_single TYPE REF TO cl_gui_custom_container.
-*" Container để hiển thị ALV Item trong SINGLE UPLOAD mode
-*" Screen: 0110 – Header
-*"         0113 – Conditions
-*
-*" Vì Single Upload có 3 phần:
-*"   - Header form (input fields)
-*"   - Item ALV
-*"   - Condition ALV
-*" Nên bạn có go_grid_item_single + go_grid_conditions
-*
-*
-*"======================================================================
-*" 6. MONITORING CONTAINER – TAB MONITORING (SCREEN 600)
-*"======================================================================
-*
-*DATA: go_cont_monitoring TYPE REF TO cl_gui_custom_container,
-*      go_grid_monitoring TYPE REF TO cl_gui_alv_grid,
-*      go_event_handler_moni TYPE REF TO lcl_event_handler.
-*
-*" Tab Monitoring để hiển thị:
-*"   - Sales Order status
-*"   - Delivery status
-*"   - Billing status
-*"   - Accounting status
-*" Và các icon phase (SO → Delivery → PGI → Billing → FI)
-*
-*
-*"======================================================================
-*" 7. PGI / DELIVERY CONTAINER (SCREEN 021x)
-*"======================================================================
-*
-*DATA: go_cont_pgi TYPE REF TO cl_gui_custom_container,
-*      go_grid_pgi TYPE REF TO cl_gui_alv_grid.
-*
-*" Tab PGI (Post Goods Issue)
-*"   - Hiển thị item delivery
-*"   - Checkbox để chọn line post PGI
-*"   - Message sau PGI thành công
-*
-*
-*"======================================================================
-*" 8. POPUP CONTAINER (GRID TRONG POPUP – ERROR LOG / INCOMP LOG)
-*"======================================================================
-*
-*" Dùng field catalog kiểu cũ (SLIS) vì popup ALV dùng REUSE_ALV_GRID_DISPLAY
-*
-*" Popup sử dụng container tạm thời của ALV function module
-*" Không cần OBJECT container cố định trong TOP
-*
-*
-*"======================================================================
-*" 9. HTML SUMMARY CONTAINER – Render HTML bên phải (Screen 0400)
-*"======================================================================
-*
-*DATA: go_summary_container TYPE REF TO cl_gui_custom_container,
-*      go_summary_html TYPE REF TO cl_dd_document.
-*
-*" Dùng để render Summary Box đẹp như nhóm kia:
-*"   - Icon LED
-*"   - Tổng số Sales Orders
-*"   - Tổng giá trị
-*"   - Tổng error/success
-*
-**&---------------------------------------------------------------------*
-**&  BLOCK 4 – CONSTANTS (Sheet Names, Status Texts, FCodes, Icons)
-**&---------------------------------------------------------------------*
-*
-*"======================================================================
-*" 1. CONSTANTS FOR EXCEL SHEET NAMES
-*"======================================================================
-*
-*CONSTANTS:
-*  gc_sheet_header TYPE string VALUE 'Header',   " Tên sheet chứa dữ liệu Header
-*  gc_sheet_item   TYPE string VALUE 'Item'.     " Tên sheet chứa dữ liệu Item
-*
-*" Nếu có thêm sheet Pricing → sẽ có thêm gc_sheet_cond = 'Pricing'
-*" Chương trình dùng constant này khi:
-*"   - Validate template structure
-*"   - Map từ Excel vào internal table
-*"   - Lỗi tên sheet sẽ báo ngay đầu validate
-*
-*
-*"======================================================================
-*" 2. CONSTANTS FOR STATUS TEXT (Used in Validation + Result)
-*"======================================================================
-*
-*CONSTANTS:
-*  gc_status_comp TYPE char20 VALUE 'Complete',   " SO/DLV tạo thành công
-*  gc_status_err  TYPE char20 VALUE 'Error',      " Lỗi Validate hoặc Lỗi BAPI
-*  gc_status_new  TYPE char20 VALUE 'New'.        " Dòng mới upload, chưa validate
-*
-*" Ý nghĩa:
-*"   - gc_status_new : Load xong file → tất cả là NEW
-*"   - VALIDATE → chuyển sang READY / INCOMPLETE / ERROR
-*"   - POST → chuyển SUCCESS / FAILED
-*"
-*" Các giá trị này được gắn vào:
-*"   - gt_hd_val-rowcolor
-*"   - gt_hd_suc-status
-*"   - popup log
-*
-*
-*"======================================================================
-*" 3. CONSTANTS FOR FUNCTION CODES (BUTTONS IN PAI)
-*"======================================================================
-*
-*CONSTANTS:
-*  gc_fc_check TYPE syucomm VALUE 'CHECK',   " Button VALIDATE
-*  gc_fc_save  TYPE syucomm VALUE 'SAVE',    " SAVE TO STAGING
-*  gc_fc_crea  TYPE syucomm VALUE 'CREA',    " CREATE SALES ORDER
-*  gc_fc_exit  TYPE syucomm VALUE 'EXIT'.    " BACK / EXIT / LEAVE PROGRAM
-*
-*" Nơi dùng:
-*"   - case ok_code trong PAI của screen 0200
-*"   - Nếu user nhấn VALIDATE → gọi perform validate_data
-*"   - Nhấn SAVE → save staging
-*"   - Nhấn CREATE → BAPI_SALESORDER_CREATEFROMDAT2
-*"   - Nhấn EXIT → xử lý popup “Do you want to exit?”
-*
-*
-*"======================================================================
-*" 4. ICON CONSTANTS (LED INDICATORS)
-*"======================================================================
-*
-*CONSTANTS:
-*  gc_icon_red    TYPE icon-name VALUE 'ICON_LED_RED',     " Error
-*  gc_icon_yellow TYPE icon-name VALUE 'ICON_LED_YELLOW',  " Incomplete / Warning
-*  gc_icon_green  TYPE icon-name VALUE 'ICON_LED_GREEN'.   " Ready / Success
-*
-*" 3 icon này là cốt lõi cho UI/UX:
-*"   - Header ALV: icon field show trạng thái mỗi dòng
-*"   - Condition ALV: highlight rules
-*"   - Validation Summary: đếm số Ready/Incomplete/Error
-*"   - Success tab: LED xanh toàn bộ
-*"   - Failed tab : LED đỏ tất cả
-*
-**&---------------------------------------------------------------------*
-**&  BLOCK 6 – TYPES CHO HEADER / ITEM / CONDITION
-**&  STRUCTURE, INTERNAL TABLES, ALV GRID OBJECTS, EVENT HANDLER OBJECTS, FIELD CATALOG
-**&---------------------------------------------------------------------*
-*
-*"======================================================================
-*" 1. STRUCTURE FOR VALIDATION ERROR LOG
-*"======================================================================
-*TYPES: BEGIN OF ty_validation_error,
-*         temp_id   TYPE char10,     " Khóa nối Header/Item (H001, H002...)
-*         item_no   TYPE posnr_va,   " Item số mấy (10, 20, 30...) – để trace lỗi
-*         fieldname TYPE fieldname,  " Tên field gây lỗi (MATNR, VKORG…)
-*         message   TYPE string,     " Mô tả lỗi hiển thị trong popup
-*       END OF ty_validation_error.
-*
-*TYPES: ty_t_validation_error TYPE STANDARD TABLE OF ty_validation_error
-*       WITH EMPTY KEY.
-*
-*"======================================================================
-*" 2. HEADER STRUCTURE (Mass Upload – 3 Tabs)
-*"======================================================================
-*TYPES: BEGIN OF ty_header.
-*         INCLUDE TYPE ztb_so_upload_hd. " Toàn bộ field của bảng staging header
-*  TYPES:
-*         icon     TYPE icon-internal,   " LED theo trạng thái dòng (Green/Yellow/Red)
-*         celltab  TYPE lvc_t_scol,      " Màu từng ô (optional)
-*         rowcolor TYPE char4,           " Màu cả dòng: C610 = đỏ, C500 = vàng, C200 = xanh
-*         err_btn  TYPE icon-internal,   " Icon hotspot để click xem lỗi
-*       END OF ty_header.
-*
-*TYPES ty_t_header TYPE STANDARD TABLE OF ty_header WITH DEFAULT KEY.
-*
-*"======================================================================
-*" 3. ITEM STRUCTURE (Mass Upload – 3 Tabs)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_item.
-*         INCLUDE TYPE ztb_so_upload_it. " Bảng staging item
-*  TYPES:
-*         icon     TYPE icon-internal,
-*         celltab  TYPE lvc_t_scol,
-*         rowcolor TYPE char4,
-*         err_btn  TYPE icon-internal,
-*       END OF ty_item.
-*
-*TYPES ty_t_item TYPE STANDARD TABLE OF ty_item WITH DEFAULT KEY.
-*
-*"======================================================================
-*" 4. CONDITION STRUCTURE (Mass Upload – Pricing – 3 Tabs)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_condition.
-*         INCLUDE TYPE ztb_so_upload_pr.   " Bảng pricing staging
-*  TYPES:
-*         icon     TYPE icon-internal,
-*         rowcolor TYPE char4,
-*         celltab  TYPE lvc_t_scol,
-*         err_btn  TYPE icon-internal,
-*       END OF ty_condition.
-*
-*"======================================================================
-*" 5. INTERNAL TABLES FOR 3 TAB MASS UPLOAD
-*"======================================================================
-*
-*" Tab 1: Validated
-*DATA: gt_hd_val TYPE TABLE OF ty_header,
-*      gt_it_val TYPE TABLE OF ty_item,
-*      gt_pr_val TYPE TABLE OF ty_condition.
-*
-*" Tab 2: Success
-*DATA: gt_hd_suc TYPE TABLE OF ty_header,
-*      gt_it_suc TYPE TABLE OF ty_item,
-*      gt_pr_suc TYPE TABLE OF ty_condition.
-*
-*" Tab 3: Failed
-*DATA: gt_hd_fail TYPE TABLE OF ty_header,
-*      gt_it_fail TYPE TABLE OF ty_item,
-*      gt_pr_fail TYPE TABLE OF ty_condition.
-*
-*"======================================================================
-*" 6. ALV GRID OBJECTS CHO 9 GRID (3 tabs × 3 bảng)
-*"======================================================================
-*
-*" Tab 1 – Validated
-*DATA: go_grid_hdr_val TYPE REF TO cl_gui_alv_grid,
-*      go_grid_itm_val TYPE REF TO cl_gui_alv_grid,
-*      go_grid_cnd_val TYPE REF TO cl_gui_alv_grid.
-*
-*" Tab 2 – Success
-*DATA: go_grid_hdr_suc TYPE REF TO cl_gui_alv_grid,
-*      go_grid_itm_suc TYPE REF TO cl_gui_alv_grid,
-*      go_grid_cnd_suc TYPE REF TO cl_gui_alv_grid.
-*
-*" Tab 3 – Failed
-*DATA: go_grid_hdr_fail TYPE REF TO cl_gui_alv_grid,
-*      go_grid_itm_fail TYPE REF TO cl_gui_alv_grid,
-*      go_grid_cnd_fail TYPE REF TO cl_gui_alv_grid.
-*
-*"======================================================================
-*" 7. EVENT HANDLER OBJECTS CHO MỖI GRID
-*"======================================================================
-*
-*DATA: go_event_hdr_val TYPE REF TO lcl_event_handler,
-*      go_event_itm_val TYPE REF TO lcl_event_handler,
-*      go_event_cnd_val TYPE REF TO lcl_event_handler,
-*
-*      go_event_hdr_suc TYPE REF TO lcl_event_handler,
-*      go_event_itm_suc TYPE REF TO lcl_event_handler,
-*      go_event_cnd_suc TYPE REF TO lcl_event_handler,
-*
-*      go_event_hdr_fail TYPE REF TO lcl_event_handler,
-*      go_event_itm_fail TYPE REF TO lcl_event_handler,
-*      go_event_cnd_fail TYPE REF TO lcl_event_handler.
-*
-*
-*"======================================================================
-*" 8. SINGLE UPLOAD STRUCTURE (Header already separate, here is Item)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_item_details.
-*         INCLUDE TYPE ztb_so_item_sing.     " Structure của Single Upload Item
-*  TYPES:
-*         icon        TYPE icon-internal,
-*         status_code TYPE c LENGTH 1,        " READY/ERROR/INCOMP
-*         status_text TYPE char20,
-*         message     TYPE string,            " Lỗi validate inline
-*         style       TYPE lvc_t_styl,        " Enable/Disable edit cell
-*         celltab     TYPE lvc_t_scol,        " Tô màu theo ô
-*         rowcolor    TYPE char4.             " Tô màu cả dòng
-*TYPES END OF ty_item_details.
-*
-*TYPES ty_t_item_details TYPE STANDARD TABLE OF ty_item_details WITH DEFAULT KEY.
-*
-*DATA: gt_item_details TYPE ty_t_item_details.
-*
-*"======================================================================
-*" 9. SINGLE UPLOAD CONDITION STRUCTURE
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_cond_alv.
-*         INCLUDE TYPE ztb_so_cond_sing.   " Pricing for Single Upload
-*  TYPES:
-*         icon        TYPE icon-internal,
-*         status_code TYPE c LENGTH 1,
-*         status_text TYPE char20,
-*         message     TYPE string,
-*         style       TYPE lvc_t_styl,
-*         celltab     TYPE lvc_t_scol,
-*         rowcolor    TYPE char4.
-*TYPES END OF ty_cond_alv.
-*
-*TYPES ty_t_cond_alv TYPE STANDARD TABLE OF ty_cond_alv WITH DEFAULT KEY.
-*
-*DATA: gt_conditions_alv TYPE ty_t_cond_alv.
-*
-*"======================================================================
-*" 10. FIELD CATALOG CHO HEADER / ITEM / CONDITION
-*"======================================================================
-*
-*DATA: gt_fcat_header TYPE lvc_t_fcat,
-*      gt_fcat_item   TYPE lvc_t_fcat,
-*      gt_fcat_cond   TYPE lvc_t_fcat.
-*
-*"======================================================================
-*" BLOCK 7 – STAGING & RESULT STRUCTURES
-*"======================================================================
-*
-*"======================================================================
-*" 1. RAW DATA (Excel raw string before mapping)S
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_rawdata,
-*         data TYPE string,
-*       END OF ty_rawdata.
-*
-*DATA: gs_rawdata TYPE ty_rawdata,
-*      gt_rawdata TYPE STANDARD TABLE OF ty_rawdata.
-*
-*"======================================================================
-*" 2. STAGING STRUCTURE KẾT HỢP HEADER + ITEM
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_staging,
-*         temp_id        TYPE char10,       " Khóa nối Header–Item cùng 1 SO
-*
-*         "----- Header fields -----
-*         sales_org      TYPE vbak-vkorg,
-*         dist_chnl      TYPE vbak-vtweg,
-*         division       TYPE vbak-spart,
-*         sold_to_party  TYPE vbak-kunnr,
-*         ship_to_party  TYPE vbak-kunnr,
-*         cust_ref       TYPE vbak-bstnk,
-*         req_date       TYPE vbak-vdatu,
-*         order_type     TYPE auart,
-*         currency       TYPE waers,
-*
-*         "----- Item fields -----
-*         item_no        TYPE posnr_va,
-*         matnr          TYPE matnr,
-*         short_text     TYPE arktx,
-*         qty            TYPE kwmeng,
-*         uom            TYPE vrkme,
-*         plant          TYPE werks_d,
-*         store_loc      TYPE lgort_d,
-*
-*         "----- Pricing fields (if any) -----
-*         cond_type      TYPE konwa,
-*         cond_value     TYPE kbetr,
-*END OF ty_staging.
-*
-*DATA: gt_staging TYPE STANDARD TABLE OF ty_staging,
-*      gs_staging TYPE ty_staging.
-*
-*"======================================================================
-*" 3. RESULT STRUCTURE (SALES ORDER RESULT)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_result,
-*         temp_id   TYPE char10,       " Map lại temp_id H001/H002
-*         vbeln     TYPE vbak-vbeln,   " Sales Order Number
-*         vkorg     TYPE vbak-vkorg,
-*         vtweg     TYPE vbak-vtweg,
-*         spart     TYPE vbak-spart,
-*         sold_to   TYPE vbak-kunnr,
-*         ship_to   TYPE vbak-kunnr,
-*         bstkd     TYPE vbak-bstnk,   " Customer Reference
-*         req_date  TYPE vbak-vdatu,
-*         qty       TYPE i,            " Tổng qty của SO
-*         volume    TYPE wrbtr,        " Tổng giá trị SO
-*         status    TYPE char20,       " Complete / Incomplete / Error
-*         message   TYPE string,       " Error/Sucess message from BAPI
-*END OF ty_result.
-*
-*DATA: gt_result TYPE STANDARD TABLE OF ty_result,
-*      gs_result TYPE ty_result.
-*
-*"======================================================================
-*" 4. DELIVERY RESULT STRUCTURE (Auto Delivery → PGI)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_delivery_result,
-*         vbeln_vl   TYPE likp-vbeln,   " Delivery Number
-*         vbeln_va   TYPE vbak-vbeln,   " Sales Order Number
-*         vkorg      TYPE vbak-vkorg,
-*         vtweg      TYPE vbak-vtweg,
-*         spart      TYPE vbak-spart,
-*         kunnr      TYPE vbak-kunnr,   " Ship-to Party
-*         lfart      TYPE likp-lfart,   " Delivery Type
-*         wadat_ist  TYPE likp-wadat_ist, " Planned GI date
-*         status     TYPE char20,       " Complete/Error
-*         message    TYPE string,       " Message returned from BAPI
-*END OF ty_delivery_result.
-*
-*DATA: gt_delivery_result TYPE STANDARD TABLE OF ty_delivery_result,
-*      gs_delivery_result TYPE ty_delivery_result.
-*
-*"======================================================================
-*" 5. VA05 STYLE STRUCTURE (Item-level SO status)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_va05,
-*         cust_ref TYPE vbak-bstnk,     " Customer Reference
-*         doc_date TYPE dats,           " Document Date
-*         doc_type TYPE auart,          " Order Type
-*         vbeln    TYPE vbak-vbeln,     " SO number
-*         posnr    TYPE posnr_va,       " Item
-*         sold_to  TYPE vbak-kunnr,
-*         matnr    TYPE vbap-matnr,
-*         qty      TYPE kwmeng,
-*         uom      TYPE vrkme,
-*         netwr    TYPE wrbtr,
-*         waerk    TYPE waers,
-*         status   TYPE char20,         " CREATED / INCOMPLETE / ERROR
-*END OF ty_va05.
-*
-*DATA: gt_va05_all     TYPE STANDARD TABLE OF ty_va05,
-*      gt_va05_created TYPE STANDARD TABLE OF ty_va05,
-*      gt_va05_incomp  TYPE STANDARD TABLE OF ty_va05.
-*
-*"======================================================================
-*" 6. DELIVERY PROCESSING STRUCTURE (PGI)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_delivery_ext,
-*         sel         TYPE char1,          " Checkbox chọn item
-*         vbeln_so    TYPE vbak-vbeln,     " SO
-*         vbeln_dlv   TYPE likp-vbeln,     " Delivery
-*         vkorg       TYPE vbak-vkorg,
-*         vtweg       TYPE vbak-vtweg,
-*         spart       TYPE vbak-spart,
-*         kunnr_sold  TYPE vbak-kunnr,     " Sold-to
-*         kunnr_ship  TYPE vbak-kunnr,     " Ship-to
-*         bstkd       TYPE vbak-bstnk,     " Cust Ref
-*         lfart       TYPE likp-lfart,     " Delivery Type
-*         erdat       TYPE likp-erdat,     " Created date
-*         ernam       TYPE likp-ernam,     " Created by
-*         status      TYPE char20,         " Status before PGI
-*         message     TYPE string,         " Message after PGI
-*END OF ty_delivery_ext.
-*
-*DATA: gt_delivery      TYPE STANDARD TABLE OF ty_delivery_ext,
-*      gs_delivery      TYPE ty_delivery_ext,
-*      gt_deliv_pgi     TYPE STANDARD TABLE OF ty_delivery_ext,
-*      gs_deliv_pgi     TYPE ty_delivery_ext.
-*
-*"======================================================================
-*" BLOCK 8 – DELIVERY / PGI / MONITORING / TRACKING STRUCTURES
-*"======================================================================
-*
-*"======================================================================
-*" 1. PGI Detail (Screen 300 – Header)
-*"======================================================================
-*
-*DATA: gs_pgi_detail_ui TYPE zsd4_pgi_detail_ui.
-*
-*"======================================================================
-*" 2. PGI Process Header (NEW – Tab 2 trong Screen 300)
-*"======================================================================
-*DATA: gs_pgi_process_ui TYPE zstr_pgi_process_ui.
-*
-*"======================================================================
-*" 3. PGI Item List (Screen 021x – ALL ITEMS)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_pgi_all_items.
-*         INCLUDE TYPE ztb_pgi_all_item. " Bảng Z lưu item chuẩn bị PGI
-*  TYPES:
-*         icon        TYPE icon-internal,   " LED cho trạng thái
-*         status_code TYPE c LENGTH 1,      " R/E/W
-*         message     TYPE string,          " Thông báo PGI từng item
-*         style       TYPE lvc_t_styl.      " Enable/Disable edit cell
-*TYPES END OF ty_pgi_all_items.
-*
-*TYPES: ty_t_pgi_all_items TYPE STANDARD TABLE OF ty_pgi_all_items WITH DEFAULT KEY.
-*
-*DATA: gt_pgi_all_items TYPE ty_t_pgi_all_items,
-*      gt_fieldcat_pgi_all TYPE lvc_t_fcat,
-*      go_cont_pgi_all TYPE REF TO cl_gui_custom_container,
-*      go_grid_pgi_all TYPE REF TO cl_gui_alv_grid,
-*      go_event_pgi_all TYPE REF TO lcl_event_handler.
-*
-*"======================================================================
-*" 4. MONITORING (SCREEN 0600)
-*"======================================================================
-*
-*DATA: go_container TYPE REF TO cl_gui_custom_container,
-*      go_alv       TYPE REF TO cl_gui_alv_grid.
-*
-*TYPES: BEGIN OF ty_so_monitoring,
-*         status   TYPE char20,     " COMPLETED / DELIVERY CREATED / BILLED / PGI DONE
-*         vbeln    TYPE vbak-vbeln, " SO number
-*         auart    TYPE vbak-auart, " Order type
-*         erdat    TYPE vbak-erdat, " Created
-*         vdatu    TYPE vbak-vdatu, " Requested Delivery Date
-*         vkorg    TYPE vbak-vkorg,
-*         vtweg    TYPE vbak-vtweg,
-*         spart    TYPE vbak-spart,
-*         sold_to  TYPE char60,     " Sold-to name (converted from KNA1)
-*         posnr    TYPE vbap-posnr, " Item
-*         matnr    TYPE vbap-matnr,
-*         kwmeng   TYPE vbap-kwmeng,
-*         vrkme    TYPE vbap-vrkme,
-*         netwr    TYPE vbap-netwr,
-*         waerk    TYPE vbak-waerk,
-*       END OF ty_so_monitoring.
-*
-*DATA: gt_data TYPE STANDARD TABLE OF ty_so_monitoring,
-*      gs_data TYPE ty_so_monitoring.
-*
-*"======================================================================
-*" 5. TRACKING GRAPH (SCREEN 0500 – HTML + IMAGES)
-*"======================================================================
-*
-*DATA: go_html_container TYPE REF TO cl_gui_custom_container,
-*      go_html_viewer    TYPE REF TO cl_gui_html_viewer.
-*
-*"======================================================================
-*" 6. TRACKING TAB (SCREEN 0700)
-*"======================================================================
-*
-*CONTROLS: TAB_MAIN TYPE TABSTRIP.
-*DATA: G_CURRSU_TAB TYPE CHAR10 VALUE 'FITEM'.   " Tab Item default
-*
-*TYPES: BEGIN OF ty_tracking,
-*         process_phase       TYPE char30,  " SALES ORDER / DELIVERY / BILLING / FI
-*         sales_document      TYPE vbeln_va,
-*         delivery_document   TYPE vbeln_vl,
-*         billing_document    TYPE vbeln_vf,
-*         order_type          TYPE auart,
-*         document_date       TYPE erdat,
-*         sales_org           TYPE vkorg,
-*         distr_chan          TYPE vtweg,
-*         division            TYPE spart,
-*         sold_to_party       TYPE kunnr,
-*         net_value           TYPE netwr,
-*         currency            TYPE waers,
-*         req_delivery_date   TYPE edatu,
-*         error_msg           TYPE string,  " Error từ BAPI hoặc status
-*         created_by          TYPE ernam,
-*         phase_icon          TYPE icon_d,  " icon: SO, DLV, PGI, BIL, FI
-*         sel_box             TYPE c LENGTH 1, " Checkbox cho thao tác hàng loạt
-*       END OF ty_tracking.
-*
-*DATA: gt_tracking TYPE STANDARD TABLE OF ty_tracking,
-*      gs_tracking TYPE ty_tracking.
-*
-*"======================================================================
-*" 7. VBFA LINK (SO → DLV → BIL)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_vbfa_link,
-*         vbelv   TYPE vbfa-vbelv,      " Preceding document (SO)
-*         vbeln   TYPE vbfa-vbeln,      " Subsequent document (Delivery/Billing)
-*         vbtyp_n TYPE vbfa-vbtyp_n,    " Type of subsequent document
-*       END OF ty_vbfa_link.
-*
-*DATA: lt_delv TYPE TABLE OF ty_vbfa_link,
-*      ls_delv TYPE ty_vbfa_link,
-*      lt_bil  TYPE TABLE OF ty_vbfa_link,
-*      ls_bil  TYPE ty_vbfa_link.
-*
-*"======================================================================
-*" 8. STATUS FLAGS CHO TỪNG PHASE
-*"======================================================================
-*
-*DATA: lv_has_delv            TYPE abap_bool,
-*      lv_has_delv_not_pgi    TYPE abap_bool,
-*      lv_has_pgi_no_billing  TYPE abap_bool,
-*      lv_has_billing_no_fi   TYPE abap_bool,
-*      lv_has_billing_with_fi TYPE abap_bool,
-*      lv_so_reject           TYPE abap_bool.
-*
-*"======================================================================
-*" 9. DELIVERY / BILLING / FI Helper Variables
-*"======================================================================
-*
-*DATA: lv_wadat_ist TYPE likp-wadat_ist,   " Actual GI date
-*      lv_faksk     TYPE vbak-faksk,       " Rejection status
-*      lv_belnr_fi  TYPE bkpf-belnr,       " Accounting document number
-*      lv_awkey     TYPE bkpf-awkey.       " Key linking Billing → FI
-*
-*"======================================================================
-*" 10. Search / Filter Variables (Tracking Tab)
-*"======================================================================
-*DATA:
-*  gv_vbeln    TYPE vbak-vbeln,
-*  gv_kunnr    TYPE vbak-kunnr,
-*  gv_ernam    TYPE vbak-ernam,
-*  gv_vkorg    TYPE vbak-vkorg,
-*  gv_vtweg    TYPE vbak-vtweg,
-*  gv_spart    TYPE vbak-spart,
-*  gv_doc_date TYPE vbak-erdat.
-*
-*"======================================================================
-*" 12. ERROR LOG FOR PGI POPUP
-*"======================================================================
-**DATA: go_summary_container TYPE REF TO cl_gui_custom_container,
-**      go_summary_html      TYPE REF TO cl_dd_document.
-*
-*"======================================================================
-*" BLOCK 9 – POPUP STRUCTURES (INCOMPLETION LOG + ERROR LOG)
-*"======================================================================
-*
-*"======================================================================
-*" 1. INCOMPLETION LOG STRUCTURE
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_incomp_log,
-*         group_desc TYPE text40,   " Nhóm lỗi (Partner, Pricing, Delivery…)
-*         cell_cont  TYPE text40,   " Field cụ thể bị thiếu (Material, Qty…)
-*       END OF ty_incomp_log.
-*
-*TYPES: ty_t_incomp_log TYPE STANDARD TABLE OF ty_incomp_log WITH DEFAULT KEY.
-*
-*"======================================================================
-*" 2. ERROR LOG STRUCTURE (GENERAL ERROR POPUP)
-*"======================================================================
-*
-*TYPES: BEGIN OF ty_error_log,
-*         icon    TYPE c LENGTH 4,   " @0A@, @08@, @0C@ (Message icon)
-*         msgty   TYPE symsgty,      " I / W / E / A / S
-*         msgno   TYPE symsgno,      " Số message
-*         msgv1   TYPE symsgv1,      " Tham số 1
-*         msgv2   TYPE symsgv2,
-*         msgv3   TYPE symsgv3,
-*         msgv4   TYPE symsgv4,
-*         message TYPE string,       " Chuỗi thông báo hoàn chỉnh
-*       END OF ty_error_log.
-*
-*TYPES: ty_t_error_log TYPE STANDARD TABLE OF ty_error_log WITH DEFAULT KEY.
-*
-*"======================================================================
-*" 3. POPUP ALV FIELD CATALOG
-*"======================================================================
-*DATA: gt_fieldcat_popup TYPE slis_t_fieldcat_alv.
-*
-*"======================================================================
-*" BLOCK 10 – HELPER VARIABLES, FILTERS, DROPDOWNS, FIELDCAT, LAYOUT, CONTAINERS
-*"======================================================================
-*
-*"======================================================================
-*" 1. MODE FLAGS (Edit/Display Mode)
-*"======================================================================
-*
-*DATA: gv_mode   TYPE string.        " Chế độ chạy tổng quát (nếu cần)
-*DATA: gs_edit   TYPE abap_bool.     " 'X' = Edit Mode, ' ' = Display Mode
-*
-*"======================================================================
-*" 2. HEADER/ITEM TOGGLING FLAGS (Mass Upload Validation UI)
-*"======================================================================
-*
-*DATA: gv_flag_header TYPE abap_bool VALUE abap_true,   " Default: show Header ALV
-*      gv_flag_item   TYPE abap_bool VALUE abap_true.   " Default: show Item ALV
-*
-*"======================================================================
-*" 3. GRID TITLE, LAYOUT & VARIANT
-*"======================================================================
-*
-*DATA: gv_grid_title TYPE lvc_title,   " Title cho grid ALV
-*      gs_layout     TYPE lvc_s_layo,  " Layout chuẩn của LVC ALV (colors, zebra…)
-*      gs_variant    TYPE disvariant.  " Lưu variant người dùng (nếu cho phép)
-*
-*"======================================================================
-*" 4. GRID TOOLBAR EXCLUSION (Ẩn nút ALV)
-*"======================================================================
-*
-*DATA: gt_exclude TYPE ui_functions.    " Danh sách nút ALV cần ẩn
-*
-*"======================================================================
-*" 5. SORTING & FILTERING STRUCTURES
-*"======================================================================
-*
-*DATA: gt_sort   TYPE lvc_t_sort,     " ALV sorting rules
-*      gt_filter TYPE lvc_t_filt.     " ALV filtering rules
-*
-*"======================================================================
-*" 6. GENERAL FIELDCAT (Dynamic Build)
-*"======================================================================
-*
-*DATA: gt_fieldcat TYPE lvc_t_fcat.    " Field catalog build tạm thời
-*
-*"======================================================================
-*" 7. FILTER FIELDS (Screen Painter Input Fields – VERY IMPORTANT)
-*"======================================================================
-*
-*DATA:
-*  FROM_DAT  TYPE dats,      " From Date filter
-*  TO_DAT    TYPE dats,      " To Date filter
-*  SALES_ORD TYPE vbeln_va,  " Sales Order filter (single)
-*  SOLD_TO   TYPE kunnr,     " Sold-to filter
-*  MATERIAL  TYPE matnr,     " Material filter
-*  SALE_ORG  TYPE vkorg,     " Sales Org filter
-*  DIST_CHAN TYPE vtweg,     " Distribution Channel filter
-*  DIVI      TYPE spart,     " Division filter
-*  STATUS    TYPE char20.    " Status filter (Created/Incomplete/Error)
-*
-*"======================================================================
-*" 8. OUTPUT TOTALS (Footer Result Summary)
-*"======================================================================
-*
-*DATA:
-*  TO_STA TYPE char20,    " Status label hiển thị dưới ALV
-*  TOSO   TYPE int4,      " Total số Sales Orders
-*  TO_VAL TYPE netwr.     " Total Net Value toàn SO
-*
-*"======================================================================
-*" 9. FLAG CHO MONITOR TAB (Load First Time)
-*"======================================================================
-*
-*DATA: gv_monitor_first_load TYPE abap_bool VALUE abap_true.
-*
-*"======================================================================
-*" 10. PGI TABSTRIP DECLARATION
-*"======================================================================
-*
-**&SPWIZARD: FUNCTION CODES FOR TABSTRIP 'TS_PGI'
-*CONSTANTS: BEGIN OF C_TS_PGI,
-*             TAB1 LIKE SY-UCOMM VALUE 'TS_PGI_FC1',
-*             TAB2 LIKE SY-UCOMM VALUE 'TS_PGI_FC2',
-*           END OF C_TS_PGI.
-*
-*CONTROLS: TS_PGI TYPE TABSTRIP.
-*
-*DATA: BEGIN OF G_TS_PGI,
-*        SUBSCREEN   LIKE SY-DYNNR,
-*        PROG        LIKE SY-REPID VALUE 'ZSD4_MASS_PROC',
-*        PRESSED_TAB LIKE SY-UCOMM VALUE C_TS_PGI-TAB1,
-*      END OF G_TS_PGI.
-*
-*"======================================================================
-*" 11. IMAGE CONTAINERS FOR SCREEN 0600 (GRAPH)
-*"======================================================================
-*
-*DATA: go_container1 TYPE REF TO cl_gui_custom_container,
-*      go_picture1   TYPE REF TO cl_gui_picture,
-*      go_container2 TYPE REF TO cl_gui_custom_container,
-*      go_picture2   TYPE REF TO cl_gui_picture.
-*
-*"======================================================================
-*" 12. FIELDCAT & LAYOUT CHO DELIVERY FLOW / TRACKING
-*"======================================================================
-*
-*DATA: gt_fcat     TYPE lvc_t_fcat,
-*      gs_layout1  TYPE lvc_s_layo,
-*      gt_exclude1 TYPE ui_functions.
-*
-*"======================================================================
-*" 13. HANDLER CHO TAB TRACKING
-*"======================================================================
-*
-*DATA: go_event_handler_track TYPE REF TO lcl_event_handler.
-*
-*"======================================================================
-*" 14. "SUMMARY BOX" (HTML Render)
-*"======================================================================
-*
-**DATA: go_summary_container TYPE REF TO cl_gui_custom_container,
-**      go_summary_html      TYPE REF TO cl_dd_document.
-*
-*"======================================================================
-*" 15. FILE PATH FOR UPLOAD SCREEN 0120
-*"======================================================================
-*
-*DATA: gv_filepath TYPE rlgrap-filename.   " P_FILE-SCREEN 0120
-*
-*"======================================================================
-*" 16. CONTAINERS FOR PGI (Main Screen)
-*"======================================================================
-**
-**DATA: go_cont_pgi TYPE REF TO cl_gui_custom_container,
-**      go_grid_pgi TYPE REF TO cl_gui_alv_grid.
-*
-*"======================================================================
-*" 17. SAVE LIPS DATA WHEN NECESSARY
-*"======================================================================
-*
-*DATA: lt_lips_global TYPE TABLE OF lips. " Lưu item của delivery để thao tác PGI
-
 *--------------------------------------------------------------------*
 * [HOME CENTER] GLOBAL DATA DEFINITION
 * Prefix: HC (Home Center) to avoid conflicts with Main Program
 *--------------------------------------------------------------------*
 TYPE-POOLS: icon.
+INCLUDE <icon>.
 
 * 1. Container & GUI Objects
 DATA: go_hc_container TYPE REF TO cl_gui_custom_container,   " Main Container for Screen 0100
@@ -1986,11 +960,12 @@ ENDCLASS.
 DATA: go_hc_handler TYPE REF TO lcl_hc_event_handler.
 
 *&---------------------------------------------------------------------*
-*&           REPORT MONITORING
+*&           SCREEN 0800: REPORT MONITORING
 *&---------------------------------------------------------------------*
 
 * 1. TABLES
-TABLES: vbap.
+TABLES: vbap, vbep.
+TYPE-POOLS: icon.
 
 * 2. STRUCTURE DỮ LIỆU (Thêm hậu tố _SD4)
 TYPES: BEGIN OF ty_alv_sd4,
@@ -2011,21 +986,16 @@ TYPES: BEGIN OF ty_alv_sd4,
          kwmeng    TYPE vbap-kwmeng,
          vrkme     TYPE vbap-vrkme,
          netwr_i   TYPE vbap-netwr,
-         gbstk_txt TYPE char20,
-         t_color   TYPE lvc_t_scol,
+         req_qty_i  TYPE vbep-wmeng,
+         gbstk_txt TYPE char35,
+         status_icon TYPE icon_d,
+         "t_color   TYPE lvc_t_scol,
        END OF ty_alv_sd4.
 
 " Dữ liệu hiển thị trên ALV
 DATA: gt_alv_sd4    TYPE TABLE OF ty_alv_sd4.
 " Dữ liệu gốc (để tính KPI/Chart không bị mất khi lọc)
 DATA: gt_static_sd4 TYPE TABLE OF ty_alv_sd4.
-
-* 3. DATA CHO CHART
-TYPES: BEGIN OF ty_org_sd4,
-         vkorg        TYPE vbak-vkorg,
-         total_orders TYPE i,
-       END OF ty_org_sd4.
-DATA: gt_chart_sd4 TYPE STANDARD TABLE OF ty_org_sd4.
 
 * 4. KPI VARIABLES
 DATA: gv_kpi_total_sd4 TYPE i,
@@ -2036,11 +1006,11 @@ DATA: go_cc_report    TYPE REF TO cl_gui_custom_container, " <-- Target Containe
       go_split_sd4    TYPE REF TO cl_gui_splitter_container.
 
 DATA: go_c_top_sd4    TYPE REF TO cl_gui_container,
-      go_c_mid_sd4    TYPE REF TO cl_gui_container,
+*      go_c_mid_sd4    TYPE REF TO cl_gui_container,
       go_c_bot_sd4    TYPE REF TO cl_gui_container.
 
 DATA: go_html_kpi_sd4 TYPE REF TO cl_gui_html_viewer,
-      go_html_cht_sd4 TYPE REF TO cl_gui_html_viewer,
+*      go_html_cht_sd4 TYPE REF TO cl_gui_html_viewer,
       go_alv_sd4      TYPE REF TO cl_gui_alv_grid.
 
 " Cờ kiểm soát Search
@@ -2068,3 +1038,55 @@ SELECTION-SCREEN BEGIN OF SCREEN 0801 AS SUBSCREEN.
                     s_erdat FOR vbak-erdat.
   SELECTION-SCREEN END OF BLOCK b_sd4_3.
 SELECTION-SCREEN END OF SCREEN 0801.
+
+*&---------------------------------------------------------------------*
+*&               Screen 0900 DECLARATIONS.
+*&---------------------------------------------------------------------*
+DATA: go_cc_dashboard_0900 TYPE REF TO cl_gui_custom_container,
+      go_viewer_0900       TYPE REF TO cl_gui_html_viewer.
+
+TYPES: tt_netwr  TYPE STANDARD TABLE OF netwr WITH EMPTY KEY.
+TYPES: tt_string TYPE STANDARD TABLE OF string WITH EMPTY KEY.
+
+TYPES: BEGIN OF ty_kpi_json,
+         sales   TYPE string,
+         returns TYPE string,
+         orders  TYPE string,
+       END OF ty_kpi_json.
+
+TYPES: BEGIN OF ty_dashboard_json,
+         kpi            TYPE ty_kpi_json,
+         trend          TYPE tt_netwr,
+         top_customers  TYPE tt_netwr,
+         top_cust_names TYPE tt_string,
+         trend_labels   TYPE tt_string,
+       END OF ty_dashboard_json.
+
+TYPES: BEGIN OF ty_sales_raw,
+         vbeln      TYPE vbak-vbeln,
+         auart      TYPE vbak-auart,
+         erdat      TYPE vbak-erdat,
+         netwr      TYPE vbak-netwr,
+         kunnr      TYPE vbak-kunnr,
+         vkorg      TYPE vbak-vkorg,
+         status_txt TYPE string,
+       END OF ty_sales_raw.
+
+TYPES: BEGIN OF ty_doc_flow,
+         vbelv   TYPE vbfa-vbelv,
+         vbeln   TYPE vbfa-vbeln,
+         vbtyp_n TYPE vbfa-vbtyp_n,
+         wbstk   TYPE likp-wbstk,
+         rfbsk   TYPE vbrk-rfbsk,
+         fksto   TYPE vbrk-fksto,
+       END OF ty_doc_flow.
+
+RANGES: r_vkorg FOR vbak-vkorg,
+        r_erdat FOR vbak-erdat.
+
+CLASS lcl_event_handler_0900 DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      on_sapevent FOR EVENT sapevent OF cl_gui_html_viewer
+        IMPORTING action frame getdata postdata query_table.
+ENDCLASS.

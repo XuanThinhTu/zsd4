@@ -80,17 +80,17 @@ MODULE status_0110 OUTPUT.
   SET TITLEBAR 'T0110'.
 ENDMODULE.
 
-*&---------------------------------------------------------------------*
-*& Module STATUS_0111 OUTPUT
-*&---------------------------------------------------------------------*
-*&
-*&---------------------------------------------------------------------*
+"chú ý 2
 MODULE status_0111 OUTPUT.
-  " Default setting
-  "SET the default as disabling the Tracking navigation button
-  "If save is success then Track is available
-  SET PF-STATUS 'ST0111'.
-  SET TITLEBAR 'T0111'.
+
+  " 1. Set Status & Title
+  IF gv_single_mode = 'EDIT'.
+*     SET PF-STATUS 'ZSINGLE_STATUS'. " Status có nút Save
+*     SET TITLEBAR 'ZSINGLE_TITLE' WITH 'Edit Sales Order'.
+  ELSE.
+     SET PF-STATUS 'ST0111'.
+     SET TITLEBAR 'T0111'.
+  ENDIF.
 
   " 2. Gọi FORM logic PBO chính (sẽ chứa logic ẩn/hiện nút)
   PERFORM pbo_screen_0111.
@@ -98,11 +98,19 @@ MODULE status_0111 OUTPUT.
   " Screen logic
   PERFORM pbo_modify_screen.
 
-  " Assign default value
-  PERFORM pbo_default_data.
+  " 4. Default Data (Quan trọng)
+  IF gv_single_mode = 'EDIT'.
+     " Nếu là Edit -> Không load default date (vì đã có data từ Mass)
+     " Nhưng có thể cần load text mô tả (Tên KH...) nếu Mass chưa truyền đủ
+*     PERFORM pbo_load_text_for_edit.
+  ELSE.
+     " Nếu là Create -> Load default date như cũ
+     PERFORM pbo_default_data.
+  ENDIF.
 
 ENDMODULE.
 
+"chú ý 2
 MODULE status_0200 OUTPUT.
 
   DATA: lt_exclude TYPE TABLE OF sy-ucomm.
@@ -259,9 +267,8 @@ ENDMODULE.
 MODULE status_0500 OUTPUT.
   "1. Set GUI status and title
   SET PF-STATUS 'ST0500'.
-* SET TITLEBAR 'ST_TITLE'.  "Tùy chọn nếu có titlebar riêng
+  SET TITLEBAR 'T0500'.
 
-  "2. Initialize dropdown values (từ include ZPG_216_SOF00)
   PERFORM set_dropdown_sales_status.
   PERFORM set_dropdown_delivery_status.
   PERFORM set_dropdown_billing_status.
@@ -269,68 +276,46 @@ MODULE status_0500 OUTPUT.
 ENDMODULE.
 
 *&---------------------------------------------------------------------*
-*&      Module  DISPLAY_TRACKING_ALV  OUTPUT
-*&---------------------------------------------------------------------*
-*&      Module này khởi tạo ALV Grid trong container
+*& Module display_tracking_alv OUTPUT
 *&---------------------------------------------------------------------*
 MODULE display_tracking_alv OUTPUT.
 
-  "=========================================================
-  "=== 1. KHỞI TẠO ALV (CHỈ CHẠY 1 LẦN)
-  "=========================================================
-  " Chúng ta lấy logic khởi tạo đầy đủ nhất (có event handler và checkbox)
-  IF go_container3 IS INITIAL.
+  " Chỉ khởi tạo ALV 1 lần duy nhất
+  IF go_container1 IS INITIAL.
 
-    " 1. Tạo container
-    CREATE OBJECT go_container3
-      EXPORTING container_name = 'CC_TRACKING'. "Tên container trên Screen
+    " 1. Create container
+    CREATE OBJECT go_container1
+      EXPORTING container_name = 'CC_TRACKING'.
 
-    " 2. Tạo ALV Grid
-    CREATE OBJECT go_alv1
-      EXPORTING i_parent = go_container3.
+    " 2. Create ALV Grid (Biến là go_alv)
+    CREATE OBJECT go_alv
+      EXPORTING i_parent = go_container1.
 
-    " 3. Tạo Event Handler (Quan trọng để bắt hotspot/double click)
-    " (Giả định go_event_handler_track đã được khai báo ở TOP)
-    CREATE OBJECT go_event_handler_track
+    " Khởi tạo object xử lý sự kiện (nếu chưa có)
+    IF gr_event_handler1 IS NOT BOUND.
+      CREATE OBJECT gr_event_handler1.
+    ENDIF.
+
+    SET HANDLER gr_event_handler1->handle_double_click FOR go_alv.
+
+    " 3. CHUẨN BỊ MỌI THỨ:
+    PERFORM alv_prepare.
+
+    " 4. Hiển thị ALV lần đầu
+    CALL METHOD go_alv->set_table_for_first_display
       EXPORTING
-        io_grid  = go_alv1
-        it_table = REF #( gt_tracking ).
-
-    " 4. Đăng ký (Set) các sự kiện cho ALV này
-    SET HANDLER go_event_handler_track->handle_hotspot_click FOR go_alv1.
-    " (Kích hoạt các handler khác nếu cần)
-    " SET HANDLER go_event_handler_track->handle_user_command FOR go_alv1.
-    " SET HANDLER go_event_handler_track->handle_toolbar FOR go_alv1.
-
-    " 5. Chuẩn bị Field Catalog VÀ Layout
-    PERFORM alv_prepare. " (Đảm bảo PERFORM này tạo gt_fcat và gt_exclude1)
-
-    " 6. GÁN LAYOUT CHO CHECKBOX (Rất quan trọng cho PAI)
-    gs_layout1-box_fname = 'SEL_BOX'. " Tên trường checkbox
-
-    " 7. GÁN CHẾ ĐỘ CHỌN NHIỀU
-    gs_layout1-sel_mode = 'A'. " Cho phép chọn nhiều dòng
-
-    " 8. Hiển thị ALV lần đầu
-    CALL METHOD go_alv1->set_table_for_first_display
-      EXPORTING
-        is_layout            = gs_layout1
-        it_toolbar_excluding = gt_exclude1 " Sử dụng biến từ code "dọn dẹp"
+        is_layout            = gs_layout
+        it_toolbar_excluding = gt_exclude
       CHANGING
         it_outtab            = gt_tracking
         it_fieldcatalog      = gt_fcat.
   ENDIF.
 
-  "=========================================================
-  "=== 2. SET SẴN SÀNG NHẬP LIỆU (CHẠY MỖI LẦN)
-  "=========================================================
-  " Logic này phải chạy MỖI KHI PBO được gọi (nằm ngoài IF INITIAL)
-  " để ALV biết nhận diện checkbox đã tick ở PAI.
-  "
-  " (ĐÃ SỬA: Dùng go_alv1 thay vì go_alv)
-  "=========================================================
-  IF go_alv1 IS BOUND.
-    CALL METHOD go_alv1->set_ready_for_input
+  " =========================================================
+  " BÁO CHO ALV BIẾT NÓ PHẢI Ở TRẠNG THÁI "SẴN SÀNG NHẬP LIỆU"
+  " =========================================================
+  IF go_alv IS BOUND.
+    CALL METHOD go_alv->set_ready_for_input
       EXPORTING
         i_ready_for_input = 1.
   ENDIF.
@@ -626,28 +611,33 @@ ENDMODULE.
 *& REPORT MONITORING
 *&---------------------------------------------------------------------*
 MODULE status_0800 OUTPUT.
- SET PF-STATUS 'ST0800'.
- SET TITLEBAR 'T0800'.
+  SET PF-STATUS 'ST0800'.
+  SET TITLEBAR 'T0800'.
 
- IF go_cc_report IS INITIAL.
+  IF go_cc_report IS INITIAL.
     " 1. Map vào Custom Control 'CC_REPORT' trên Screen 0800
     CREATE OBJECT go_cc_report
-      EXPORTING container_name = 'CC_REPORT'.
+      EXPORTING
+        container_name = 'CC_REPORT'.
 
-    " 2. Splitter
+    " 2. Splitter: CHỈ CÒN 2 DÒNG (1: KPI, 2: ALV)
     CREATE OBJECT go_split_sd4
-      EXPORTING parent  = go_cc_report
-                rows    = 3
-                columns = 1.
+      EXPORTING
+        parent  = go_cc_report
+        rows    = 2
+        columns = 1.
 
-    go_split_sd4->set_row_height( id = 1 height = 12 ).
-    go_split_sd4->set_row_height( id = 2 height = 40 ).
+    " Set chiều cao cho Header KPI (Ví dụ: 15%)
+    " Phần còn lại (85%) tự động dành cho ALV
+    go_split_sd4->set_row_height( id = 1 height = 15 ).
 
+    " 3. Gán Container con
     go_c_top_sd4 = go_split_sd4->get_container( row = 1 column = 1 ).
-    go_c_mid_sd4 = go_split_sd4->get_container( row = 2 column = 1 ).
-    go_c_bot_sd4 = go_split_sd4->get_container( row = 3 column = 1 ).
+    go_c_bot_sd4 = go_split_sd4->get_container( row = 2 column = 1 ).
 
-    " 3. Lấy dữ liệu lần đầu
+    " (Đã xóa go_c_mid_sd4)
+
+    " 4. Lấy dữ liệu lần đầu & Vẽ màn hình
     PERFORM get_initial_data_sd4.
     PERFORM update_dashboard_ui_sd4.
   ENDIF.
@@ -661,4 +651,22 @@ ENDMODULE.
 MODULE status_0802 OUTPUT.
  SET PF-STATUS 'ST0802'.
  SET TITLEBAR 'T0802'.
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*& Module STATUS_0900 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0900 OUTPUT.
+ SET PF-STATUS 'ST0900'.
+ SET TITLEBAR 'T0900'.
+ENDMODULE.
+
+MODULE init_dashboard_0900 OUTPUT.
+  PERFORM init_dashboard_0900.
+
+  " Mẹo: Gọi refresh data lần đầu tiên khi vào màn hình
+  " (Để tránh màn hình trắng trơn)
+  PERFORM refresh_data_0900 USING 'ALL'.
 ENDMODULE.

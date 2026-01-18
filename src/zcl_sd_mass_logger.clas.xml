@@ -22,6 +22,11 @@
      <LANGU>E</LANGU>
      <DESCRIPT>Method to Save Errors To DB</DESCRIPT>
     </SEOCOMPOTX>
+    <SEOCOMPOTX>
+     <CMPNAME>SAVE_SINGLE_ERROR</CMPNAME>
+     <LANGU>E</LANGU>
+     <DESCRIPT>Method to Save Incomplete Log to DB</DESCRIPT>
+    </SEOCOMPOTX>
    </DESCRIPTIONS>
    <DESCRIPTIONS_SUB>
     <SEOSUBCOTX>

@@ -3,13 +3,11 @@
 *&---------------------------------------------------------------------*
 
 
-*&---------------------------------------------------------------------*
-*& Form pbo_modify_screen (ĐÃ SỬA LẠI LOGIC STATE 1 - CHUẨN)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM pbo_modify_screen.
   LOOP AT SCREEN.
     CASE screen-name.
-      "--- LOGIC 1: KHÓA CÁC TRƯỜNG OUTPUT-ONLY ---
+      "--- LOGIC 1: KHÓA CÁC TRƯỜNG OUTPUT-ONLY (DÙNG CHUNG CHO CẢ EDIT VÀ CREATE) ---
       WHEN 'GS_SO_HEDER_UI-SO_HDR_VBELN'       OR  " Document Number
            'GS_SO_HEDER_UI-SO_HDR_KAL_SM'        OR  " Pric. Procedure
            'GS_SO_HEDER_UI-SO_HDR_SOLD_ADRNR'  OR  " Tên Sold-to
@@ -17,13 +15,45 @@ FORM pbo_modify_screen.
            'GS_SO_HEDER_UI-SO_HDR_SALESAREA'.       " Sales Area (Text)
         screen-input = 0.
         MODIFY SCREEN.
-        CONTINUE.
+        CONTINUE. " Xử lý xong dòng này, qua vòng lặp tiếp theo
       "--- LOGIC 1B: Bỏ qua các control (Tabstrip) ---
       WHEN 'TS_MAIN_TAB1' OR 'TS_MAIN_TAB2' OR 'TS_MAIN_TAB3'.
         CONTINUE.
     ENDCASE.
 
-    "--- LOGIC 2: XỬ LÝ CÁC TRƯỜNG CÓ THỂ INPUT (DYNAMIC) ---
+    " ========================================================================
+    " [THÊM MỚI] LOGIC RIÊNG CHO CHẾ ĐỘ 'EDIT' (TỪ MASS UPLOAD SANG)
+    " ========================================================================
+    IF gv_single_mode = 'EDIT'.
+
+       CASE screen-name.
+          " 1. KHÓA CÁC TRƯỜNG KHÓA (KEY FIELDS) - KHÔNG ĐƯỢC SỬA
+          WHEN 'GS_SO_HEDER_UI-SO_HDR_AUART'     OR  " Order Type
+               'GS_SO_HEDER_UI-SO_HDR_SOLD_ADDR' OR  " Sold-to Party
+               'GS_SO_HEDER_UI-SO_HDR_VKORG'     OR  " Sales Org
+               'GS_SO_HEDER_UI-SO_HDR_VTWEG'     OR  " Distr Channel
+               'GS_SO_HEDER_UI-SO_HDR_SPART'.        " Division
+             screen-input = 0.
+
+          " 2. MỞ CÁC TRƯỜNG DỮ LIỆU CÓ THỂ SỬA (EDITABLE FIELDS)
+          WHEN 'GS_SO_HEDER_UI-SO_HDR_BSTNK'     OR  " PO Number
+               'GS_SO_HEDER_UI-SO_HDR_KETDAT'     OR  " Req Deliv Date
+               'GS_SO_HEDER_UI-SO_HDR_AUDAT'      OR  " Document Date
+               'GS_SO_HEDER_UI-SO_HDR_ZTERM'      OR  " Payment Term (Nếu cần)
+               'GS_SO_HEDER_UI-SO_HDR_INCO1'.        " Incoterms (Nếu cần)
+             screen-input = 1.
+
+          " 3. CÁC TRƯỜNG CÒN LẠI -> GIỮ NGUYÊN HOẶC KHÓA (TÙY Ý)
+          " Ở đây mặc định ta để theo thuộc tính màn hình gốc, hoặc khóa cho an toàn
+       ENDCASE.
+
+       MODIFY SCREEN.
+       CONTINUE. " [QUAN TRỌNG] Bỏ qua Logic 2 bên dưới để không bị ghi đè
+    ENDIF.
+
+    " ========================================================================
+    " LOGIC 2: CHẾ ĐỘ 'CREATE' (LOGIC CŨ CỦA BẠN - GIỮ NGUYÊN)
+    " ========================================================================
     CASE gv_screen_state.
       "--- STATE '0': MỚI VÀO (HOẶC NHẬP SAI SOLD-TO) ---
       WHEN '0'.
@@ -42,14 +72,12 @@ FORM pbo_modify_screen.
       WHEN '1'.
         CASE screen-name.
           " SỬA LẠI: CHỈ MỞ CÁC TRƯỜNG CẦN NHẬP TIẾP
-          WHEN 'GS_SO_HEDER_UI-SO_HDR_BSTNK'      OR  " 1. Cust. Reference (Đúng tên HEDER)
+          WHEN 'GS_SO_HEDER_UI-SO_HDR_BSTNK'      OR  " 1. Cust. Reference
                'GS_SO_HEDER_UI-SO_HDR_KETDAT'     OR  " 2. Req. Deliv. Date
-               'GS_SO_HEDER_UI-SO_HDR_AUDAT'.         " 3. Document Date (Auto-fill nhưng vẫn cho SỬA)
+               'GS_SO_HEDER_UI-SO_HDR_AUDAT'.         " 3. Document Date
             screen-input = 1. " Mở 3 trường này
           WHEN OTHERS.
-            " Khóa TẤT CẢ các trường input còn lại
-            " (Bao gồm Org Data, Sold-to, VÀ CÁC TRƯỜNG AUTO-FILL:
-            "  WAERK, ZTERM, INCO1)
+            " Khóa TẤT CẢ các trường input còn lại (Org Data, Sold-to...)
             screen-input = 0.
         ENDCASE.
     ENDCASE.
@@ -134,7 +162,7 @@ ENDFORM.
 *& Form pai_derive_data (ĐÃ SỬA CHO AUTO-FILL ĐẦY ĐỦ)
 *&---------------------------------------------------------------------*
 FORM pai_derive_data.
-    DATA: lv_sold_to TYPE kunnr,
+  DATA: lv_sold_to TYPE kunnr,
         lv_ship_to TYPE kunnr.
 
   " --- 1. KIỂM TRA SOLD-TO-PARTY ---
@@ -148,8 +176,10 @@ FORM pai_derive_data.
   " Chuẩn hóa Sold-to (CHỈ DÙNG CHO BIẾN LOCAL)
   lv_sold_to = gs_so_heder_ui-so_hdr_sold_addr.
   CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-    EXPORTING input = lv_sold_to
-    IMPORTING output = lv_sold_to.
+    EXPORTING
+      input  = lv_sold_to
+    IMPORTING
+      output = lv_sold_to.
   " <<< XÓA DÒNG GÁN NGƯỢC: gs_so_heder_ui-so_hdr_sold_addr = lv_sold_to >>>
 
   " --- 2. LẤY TÊN (KNA1) ---
@@ -284,15 +314,15 @@ ENDFORM.
 *& Form DOWNLOAD_TEMPLATE (Dựa trên code ZPG của bạn)
 *&---------------------------------------------------------------------*
 FORM download_template.
-  DATA: lv_folder     TYPE string,
-        lv_full_path  TYPE rlgrap-filename,
-        lv_objid      TYPE wwwdata-objid,
-        lwa_data      TYPE wwwdatatab,
-        lv_subrc      TYPE sy-subrc,
-        lwa_rec       TYPE wwwdatatab.
+  DATA: lv_folder    TYPE string,
+        lv_full_path TYPE rlgrap-filename,
+        lv_objid     TYPE wwwdata-objid,
+        lwa_data     TYPE wwwdatatab,
+        lv_subrc     TYPE sy-subrc,
+        lwa_rec      TYPE wwwdatatab.
 
   " --- 1. SỬA: Tên object SMW0 của program này ---
-  lv_objid = 'ZSD4_FILE_TEMPLATE3'. " (Tên bạn đã upload ở Bước 1)
+  lv_objid = 'ZSD4_FILE_TEMPLATE4'. " (Tên bạn đã upload ở Bước 1)
 
   "--- 2. Hiển thị dialog chọn thư mục (Giữ nguyên) ---
   CALL METHOD cl_gui_frontend_services=>directory_browse
@@ -360,9 +390,7 @@ FORM open_file_dialog CHANGING c_gv_lpath TYPE rlgrap-filename.
   ENDIF.
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form UPLOAD_FILE (ĐÃ MERGE: Mapping chi tiết + Lưu vào Z-Table)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM upload_file
   USING
     iv_path   TYPE string
@@ -473,115 +501,6 @@ FORM upload_file
     APPEND ls_header TO ct_header.
   ENDLOOP.
 
-*  " ====================================================================
-*  " XỬ LÝ SHEET ITEM
-*  " ====================================================================
-*  CLEAR lo_data_ref. " Reset biến
-*
-*  PERFORM validate_template_structure
-*    USING lo_excel_ref 'Item' 'ztb_so_upload_it'
-*    CHANGING lo_data_ref.
-*
-*  " [QUAN TRỌNG]: Kiểm tra Bound
-*  IF lo_data_ref IS NOT BOUND. RETURN. ENDIF.
-*  ASSIGN lo_data_ref->* TO <gt_data_raw>.
-*
-*  IF <gt_data_raw> IS INITIAL. RETURN. ENDIF.
-**  DELETE <gt_data_raw> INDEX 1.
-*
-*  LOOP AT <gt_data_raw> ASSIGNING <fs_raw>.
-*    DATA(ls_item) = VALUE ztb_so_upload_it( ). " <<< TYPE MỚI (Z-Table)
-*
-*      ASSIGN COMPONENT 1 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<i_temp_id>).
-*      ASSIGN COMPONENT 2 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<item_no>).
-*      ASSIGN COMPONENT 3 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<matnr>).
-*      ASSIGN COMPONENT 4 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<plant>).
-*      ASSIGN COMPONENT 5 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<ship_point>).
-*      ASSIGN COMPONENT 6 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<stloc>).
-*      ASSIGN COMPONENT 7 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<qty>).
-*
-*
-*    CHECK <i_temp_id> IS ASSIGNED AND <i_temp_id> IS NOT INITIAL.
-*
-**    " [THÊM LẠI] Convert ngày tháng Item
-**    DATA: lv_req_dats_i TYPE dats.
-**    IF <req_date_itm> IS ASSIGNED.
-**       PERFORM convert_date_ddmmyyyy USING <req_date_itm> CHANGING lv_req_dats_i.
-**    ENDIF.
-*
-*    ls_item-req_id      = iv_req_id.      " <<< REQ_ID
-*    ls_item-status      = 'NEW'.          " <<< Status
-*    ls_item-created_by  = sy-uname.
-*    ls_item-created_on  = sy-datum.
-*
-*    ls_item-temp_id     = COND #( WHEN <i_temp_id> IS ASSIGNED THEN <i_temp_id> ).
-*
-*    " [FIX]: Khai báo biến chuyển đổi
-*    DATA: lv_itm_in TYPE string, lv_itm_out TYPE posnr_va.
-*
-*    IF <item_no> IS ASSIGNED AND <item_no> IS NOT INITIAL.
-*         lv_itm_in = <item_no>.
-*         CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_itm_in IMPORTING output = lv_itm_out.
-*         ls_item-item_no = lv_itm_out.
-*      ELSE.
-*         ls_item-item_no = '000010'.
-*      ENDIF.
-**    ls_item-item_no     = COND #( WHEN <item_no> IS ASSIGNED THEN <item_no> ).
-*    ls_item-material       = COND #( WHEN <matnr> IS ASSIGNED THEN <matnr> ).
-*    ls_item-plant       = COND #( WHEN <plant> IS ASSIGNED THEN <plant> ).
-*    ls_item-ship_point  = COND #( WHEN <ship_point> IS ASSIGNED THEN <ship_point> ).
-*    ls_item-store_loc   = COND #( WHEN <stloc> IS ASSIGNED THEN <stloc> ).
-*    ls_item-quantity    = COND #( WHEN <qty> IS ASSIGNED THEN <qty> ).
-*
-*    APPEND ls_item TO ct_item.
-*  ENDLOOP.
-*
-*  " ====================================================================
-*  " C. XỬ LÝ CONDITION (MỚI - 7 Cột)
-*  " ====================================================================
-*  CLEAR lo_data_ref.
-*  PERFORM validate_template_structure USING lo_excel_ref 'Condition' 'ZTB_SO_UPLOAD_PR' CHANGING lo_data_ref.
-*
-*  IF lo_data_ref IS NOT BOUND. RETURN. ENDIF..
-*    ASSIGN lo_data_ref->* TO <gt_data_raw>.
-*
-*    IF <gt_data_raw> IS INITIAL. RETURN. ENDIF.
-*
-*    LOOP AT <gt_data_raw> ASSIGNING <fs_raw>.
-*      DATA(ls_cond) = VALUE ztb_so_upload_pr( ).
-*
-*      ASSIGN COMPONENT 1 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<c_temp_id>).
-*      ASSIGN COMPONENT 2 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<c_item_no>).
-*      ASSIGN COMPONENT 3 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<c_type>).
-*      ASSIGN COMPONENT 4 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<c_amount>).
-*      ASSIGN COMPONENT 5 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<c_curr>).
-*      ASSIGN COMPONENT 6 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<c_per>).
-*      ASSIGN COMPONENT 7 OF STRUCTURE <fs_raw> TO FIELD-SYMBOL(<c_uom>).
-*
-*      CHECK <c_temp_id> IS ASSIGNED AND <c_temp_id> IS NOT INITIAL.
-*
-*      ls_cond-req_id     = iv_req_id.
-*      ls_cond-status     = 'NEW'.
-*      ls_cond-created_by = sy-uname.
-*      ls_cond-created_on = sy-datum.
-*      ls_cond-temp_id    = <c_temp_id>.
-*
-*      IF <c_item_no> IS ASSIGNED.
-*         lv_itm_in = <c_item_no>.
-*         CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_itm_in IMPORTING output = lv_itm_out.
-*         ls_cond-item_no = lv_itm_out.
-*      ENDIF.
-*
-*      ls_cond-cond_type  = COND #( WHEN <c_type> IS ASSIGNED THEN <c_type> ).
-*      ls_cond-currency   = COND #( WHEN <c_curr> IS ASSIGNED THEN <c_curr> ).
-*      ls_cond-uom        = COND #( WHEN <c_uom>  IS ASSIGNED THEN <c_uom> ).
-*
-*      IF <c_amount> IS ASSIGNED. TRY. ls_cond-amount = <c_amount>. CATCH cx_root. ENDTRY. ENDIF.
-*      IF <c_per>    IS ASSIGNED. TRY. ls_cond-per    = <c_per>.    CATCH cx_root. ENDTRY. ENDIF.
-*
-*      APPEND ls_cond TO ct_cond.
-*    ENDLOOP.
-
       " ====================================================================
   " B. XỬ LÝ ITEM (7 Cột - Fixed)
   " ====================================================================
@@ -671,9 +590,16 @@ FORM upload_file
       ls_cond-uom        = COND #( WHEN <c_uom>  IS ASSIGNED THEN <c_uom> ).
 
       IF <c_amount> IS ASSIGNED. TRY. ls_cond-amount = <c_amount>. CATCH cx_root. ENDTRY. ENDIF.
-      IF <c_per>    IS ASSIGNED. TRY. ls_cond-per    = <c_per>.    CATCH cx_root. ENDTRY. ENDIF.
+*      IF <c_per>    IS ASSIGNED. TRY. ls_cond-per    = <c_per>.    CATCH cx_root. ENDTRY. ENDIF.
+
+      IF <c_per> IS ASSIGNED. TRY. ls_cond-per = <c_per>. CATCH cx_root. ENDTRY. ENDIF.
+
+      " [THÊM MỚI]: Tự động đánh số thứ tự để tránh trùng khóa DB
+      " (Mỗi dòng excel sẽ có 1 số khác nhau, vd: 1, 2, 3...)
+      ls_cond-counter = sy-tabix.
 
       APPEND ls_cond TO ct_cond.
+
     ENDLOOP.
   ENDIF.
 
@@ -716,13 +642,15 @@ FORM convert_date_ddmmyyyy USING    iv_date_any TYPE any
 
         " Check if the resulting date is plausible (valid date)
         CALL FUNCTION 'DATE_CHECK_PLAUSIBILITY'
-          EXPORTING date = cv_dats
-          EXCEPTIONS OTHERS = 1.
+          EXPORTING
+            date   = cv_dats
+          EXCEPTIONS
+            OTHERS = 1.
         IF sy-subrc = 0.
-           RETURN. " Successfully converted from serial number
+          RETURN. " Successfully converted from serial number
         ELSE.
-           CLEAR cv_dats.
-           lv_raw = ''. " Conversion failed, try other formats if original wasn't purely numeric
+          CLEAR cv_dats.
+          lv_raw = ''. " Conversion failed, try other formats if original wasn't purely numeric
         ENDIF.
       CATCH cx_sy_conversion_error cx_sy_arithmetic_error.
         CLEAR cv_dats.
@@ -731,7 +659,7 @@ FORM convert_date_ddmmyyyy USING    iv_date_any TYPE any
     " If purely numeric but conversion failed OR RETURNED above, exit.
     " If not purely numeric originally, lv_raw was cleared, forcing exit below.
     IF lv_raw IS INITIAL AND cv_dats IS INITIAL.
-        RETURN.
+      RETURN.
     ENDIF.
 
   ENDIF.
@@ -755,17 +683,17 @@ FORM convert_date_ddmmyyyy USING    iv_date_any TYPE any
 
   " 6. Final Plausibility Check
   CALL FUNCTION 'DATE_CHECK_PLAUSIBILITY'
-    EXPORTING date = cv_dats
-    EXCEPTIONS OTHERS = 1.
+    EXPORTING
+      date   = cv_dats
+    EXCEPTIONS
+      OTHERS = 1.
   IF sy-subrc <> 0.
-     CLEAR cv_dats. " Invalid date created
+    CLEAR cv_dats. " Invalid date created
   ENDIF.
 
 ENDFORM.
-"--------------------------------------------------------------------------------------------------------
-*&---------------------------------------------------------------------*
-*& Form PERFORM_MASS_UPLOAD (ĐÃ SỬA: Nhận 2 tham số từ PAI)
-*&---------------------------------------------------------------------*
+
+"chú ý 2
 FORM perform_mass_upload
   USING
     iv_mode   TYPE c             " Tham số 1: Chế độ ('NEW'/'RESUBMIT')
@@ -870,231 +798,7 @@ FORM perform_mass_upload
 
 ENDFORM.
 
-
-*&---------------------------------------------------------------------*
-*& Form validate_and_classify_data
-*&---------------------------------------------------------------------*
-*& Validates data in gt_so_header/item and moves rows to
-*& _comp, _incomp, _err tables based on validation status.
-*&---------------------------------------------------------------------*
-*& -->  p1        text
-*& <--  p2        text
-*&---------------------------------------------------------------------*
-*FORM validate_and_classify_data CHANGING
-*    cv_user_canceled TYPE abap_bool.
-*
-*  FIELD-SYMBOLS: <ls_header> LIKE LINE OF gt_so_header,
-*                 <ls_item>   LIKE LINE OF gt_so_item.
-*  DATA: lt_errors TYPE ty_t_validation_error. " <<< Use specific table type here too
-*  DATA: lv_log_reqid TYPE zso_log_213-req_id VALUE 'VALIDATE_TMP'. " Temporary ID if needed
-*
-*  " --- 1. Validate Header Data (Calls V01 forms) ---
-*  " Assumes V01 forms now call 'add_validation_error' on error
-*  PERFORM validate_header_table
-*                              CHANGING gt_so_header.
-*
-*  " --- 2. Validate Item Data (Calls V01 forms) ---
-*  " Assumes V01 forms now call 'add_validation_error' on error
-*  PERFORM validate_item_table
-*                             CHANGING gt_so_item.
-*
-*  " --- CORRECTED: Get Detailed Errors using CHANGING ---
-*  PERFORM get_validation_errors
-*                                CHANGING lt_errors. " <<< CHANGE: Use CHANGING
-*  " --- END CORRECTION ---
-*
-*
-*  " --- NEW: Count Errors ---
-*  DATA: lv_error_count TYPE i.
-*  lv_error_count = lines( lt_errors ). " <<< CHANGE: Count from detailed error table
-*  DATA: lv_warn_count TYPE i. " Count warnings too
-*
-*  LOOP AT gt_so_header ASSIGNING <ls_header> WHERE status_code = 'W'.
-*    lv_warn_count = lv_warn_count + 1.
-*  ENDLOOP.
-*
-*  LOOP AT gt_so_item   ASSIGNING <ls_item>   WHERE status_code = 'W'.
-*    lv_warn_count = lv_warn_count + 1.
-*  ENDLOOP.
-*
-*  LOOP AT gt_so_header ASSIGNING <ls_header> WHERE status_code = 'E'.
-*    lv_error_count = lv_error_count + 1.
-*  ENDLOOP.
-*  LOOP AT gt_so_item ASSIGNING <ls_item> WHERE status_code = 'E'.
-*    lv_error_count = lv_error_count + 1. " Count item errors too if needed, or just header errors
-*  ENDLOOP.
-*
-*  " --- Log Validation Outcome ---
-*  DATA: lv_log_status TYPE zso_log_213-status,
-*        lv_log_msgty  TYPE zso_log_213-msgty,
-*        lv_log_msg    TYPE zso_log_213-message.
-*
-*  IF lv_error_count > 0.
-*    lv_log_status = 'FAILED'.
-*    lv_log_msgty = 'E'.
-*    lv_log_msg = |Validation failed: { lv_error_count } error(s) found.|.
-*  ELSEIF lv_warn_count > 0.
-*    lv_log_status = 'WARNING'.
-*    lv_log_msgty = 'W'.
-*    lv_log_msg = |Validation completed with { lv_warn_count } warning(s).|.
-*  ELSE.
-*    lv_log_status = 'SUCCESS'.
-*    lv_log_msgty = 'S'.
-*    lv_log_msg = |Validation successful for all records.|.
-*  ENDIF.
-*
-*  zcl_mass_so_logger_213=>log_action(
-*    " iv_reqid = lv_log_reqid " Optional: Pass REQ_ID if available
-*    iv_action = 'VALIDATE_RUN'
-*    iv_status = lv_log_status
-*    iv_msgty  = lv_log_msgty
-*    iv_msg    = lv_log_msg
-*    iv_commit = abap_true ). " Commit validation summary log
-*
-*  " --- NEW: Check Error Count and Show Warning Popup ---
-*  IF lv_error_count > 20.
-*    DATA: lv_answer TYPE c.
-*    CALL FUNCTION 'POPUP_TO_CONFIRM'
-*      EXPORTING
-*        titlebar              = 'Validation Warning'
-*        text_question         = |Found { lv_error_count } errors. It's recommended to fix the Excel file and resubmit.|
-*        text_button_1         = 'Continue Anyway' " Answer = 1
-*        icon_button_1         = 'ICON_CONTINUE'
-*        text_button_2         = 'Cancel' " Answer = 2
-*        icon_button_2         = 'ICON_CANCEL'
-*        default_button        = '2'
-*        display_cancel_button = '' " Don't display separate cancel button
-*        popup_type            = 'ICON_MESSAGE_WARNING'
-*      IMPORTING
-*        answer                = lv_answer
-*      EXCEPTIONS
-*        text_not_found        = 1
-*        OTHERS                = 2.
-*    IF sy-subrc <> 0 OR lv_answer = '2'. " If user cancels or popup fails
-*
-**     " <<< 2. PHẢI CÓ DÒNG NÀY >>>
-**      cv_user_canceled = abap_true. " Báo cho FORM cha biết là đã cancel
-*
-*      " Option 1: Stay on screen 200 but clear classified data (forcing user action)
-*       zcl_mass_so_logger_213=>log_action(
-*          " iv_reqid = lv_log_reqid " Optional
-*          iv_action = 'VALIDATE_ABORT'
-*          iv_status = 'INFO'
-*          iv_msg    = |Validation aborted by user due to >20 errors.|
-*          iv_commit = abap_true ).
-*
-*        " <<< SỬA: CHỈ CẦN GÁN CỜ >>>
-*      cv_user_canceled = abap_true.
-*    ENDIF.
-*    " If user chooses 'Continue Anyway' (lv_answer = '1'), processing continues below
-*  ENDIF.
-*  " --- END NEW SECTION ---
-*
-*  " --- 3. Classify and Move Data ---
-*  " Clear target tables before filling
-*  CLEAR: gt_so_header_comp, gt_so_item_comp,
-*         gt_so_header_incomp, gt_so_item_incomp,
-*         gt_so_header_err, gt_so_item_err.
-*
-*  DATA: lt_processed_headers TYPE HASHED TABLE OF ty_header WITH UNIQUE KEY temp_id.
-*
-*  LOOP AT gt_so_item ASSIGNING <ls_item>.
-*    READ TABLE gt_so_header ASSIGNING <ls_header>
-*                           WITH KEY temp_id = <ls_item>-temp_id BINARY SEARCH. " Assuming gt_so_header is sorted by temp_id
-*    IF sy-subrc <> 0.
-*      " Orphan item - Treat as Error or handle differently? For now, add to Error.
-*      <ls_item>-status_code = 'E'.
-*      <ls_item>-status_text = 'Error'.
-*      <ls_item>-message = 'No corresponding Header found for this Item.'.
-*      APPEND <ls_item> TO gt_so_item_err.
-*      CONTINUE.
-*    ENDIF.
-*
-*    " Determine Overall Status (Error > Warning > Success)
-*    DATA(lv_overall_status) = 'S'. " Assume Success initially
-*    IF <ls_header>-status_code = 'E' OR <ls_item>-status_code = 'E'.
-*      lv_overall_status = 'E'.
-*    ELSEIF <ls_header>-status_code = 'W' OR <ls_item>-status_code = 'W'.
-*      lv_overall_status = 'W'.
-*    ENDIF.
-*
-*    " Move based on overall status
-*    CASE lv_overall_status.
-*      WHEN 'E'. " Error
-*        APPEND <ls_item> TO gt_so_item_err.
-*        " Add header only once per Temp ID
-*        READ TABLE lt_processed_headers WITH KEY temp_id = <ls_header>-temp_id TRANSPORTING NO FIELDS.
-*        IF sy-subrc <> 0.
-*           APPEND <ls_header> TO gt_so_header_err.
-*           INSERT <ls_header> INTO TABLE lt_processed_headers.
-*        ENDIF.
-*      WHEN 'W'. " Warning -> Incomplete
-*        APPEND <ls_item> TO gt_so_item_incomp.
-*        READ TABLE lt_processed_headers WITH KEY temp_id = <ls_header>-temp_id TRANSPORTING NO FIELDS.
-*        IF sy-subrc <> 0.
-*           APPEND <ls_header> TO gt_so_header_incomp.
-*           INSERT <ls_header> INTO TABLE lt_processed_headers.
-*        ENDIF.
-*      WHEN 'S'. " Success -> Complete
-*        APPEND <ls_item> TO gt_so_item_comp.
-*         READ TABLE lt_processed_headers WITH KEY temp_id = <ls_header>-temp_id TRANSPORTING NO FIELDS.
-*        IF sy-subrc <> 0.
-*           APPEND <ls_header> TO gt_so_header_comp.
-*           INSERT <ls_header> INTO TABLE lt_processed_headers.
-*        ENDIF.
-*    ENDCASE.
-*  ENDLOOP.
-*
-* " Optional: Handle Headers that had no items (e.g., add them to Error/Incomplete)
-* LOOP AT gt_so_header ASSIGNING <ls_header>.
-*    READ TABLE lt_processed_headers WITH KEY temp_id = <ls_header>-temp_id TRANSPORTING NO FIELDS.
-*    IF sy-subrc <> 0. " This header wasn't processed (had no items)
-*       CASE <ls_header>-status_code.
-*          WHEN 'E'. APPEND <ls_header> TO gt_so_header_err.
-*          WHEN 'W'. APPEND <ls_header> TO gt_so_header_incomp.
-*          WHEN 'S'. APPEND <ls_header> TO gt_so_header_comp. " Or maybe incomplete if no items? Your choice.
-*       ENDCASE.
-*    ENDIF.
-* ENDLOOP.
-*
-**  " --- >>> ADDITION 2: Call Highlighting <<< ---
-**  PERFORM highlight_error_cells USING lt_errors. " Pass the collected errors
-**  " --- >>> END ADDITION 2 <<< ---
-*
-*  " --- 4. (Optional but recommended) Update Icons based on final classification ---
-*  PERFORM set_icons_classified_data.
-*ENDFORM.
-*&---------------------------------------------------------------------*
-*& Form set_icons_classified_data
-*&---------------------------------------------------------------------*
-*& text
-*&---------------------------------------------------------------------*
-*& -->  p1        text
-*& <--  p2        text
-*&---------------------------------------------------------------------*
-*FORM set_icons_classified_data .
-*  DATA: lv_icon_green TYPE icon-internal,
-*        lv_icon_yellow TYPE icon-internal,
-*        lv_icon_red   TYPE icon-internal.
-*
-*  SELECT SINGLE internal INTO lv_icon_green FROM icon WHERE name = gc_icon_green.
-*  SELECT SINGLE internal INTO lv_icon_yellow FROM icon WHERE name = gc_icon_yellow.
-*  SELECT SINGLE internal INTO lv_icon_red FROM icon WHERE name = gc_icon_red.
-*
-*  FIELD-SYMBOLS: <h> LIKE LINE OF gt_so_header,
-*                 <i> LIKE LINE OF gt_so_item.
-*
-*  LOOP AT gt_so_header_comp ASSIGNING <h>. <h>-icon = lv_icon_green. ENDLOOP.
-*  LOOP AT gt_so_item_comp   ASSIGNING <i>. <i>-icon = lv_icon_green. ENDLOOP.
-*  LOOP AT gt_so_header_incomp ASSIGNING <h>. <h>-icon = lv_icon_yellow. ENDLOOP.
-*  LOOP AT gt_so_item_incomp   ASSIGNING <i>. <i>-icon = lv_icon_yellow. ENDLOOP.
-*  LOOP AT gt_so_header_err ASSIGNING <h>. <h>-icon = lv_icon_red. ENDLOOP.
-*  LOOP AT gt_so_item_err   ASSIGNING <i>. <i>-icon = lv_icon_red. ENDLOOP.
-*ENDFORM.
-
-*&---------------------------------------------------------------------*
-*& Form REVALIDATE_DATA (Logic Staging: Sync -> Validate -> Load)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM revalidate_data.
 
   " 1. Log bắt đầu
@@ -1106,13 +810,6 @@ FORM revalidate_data.
     iv_msg = 'User triggered revalidation.'
     iv_commit = abap_true
   ).
-
-*  " 2. Ép ALV nhả dữ liệu user vừa sửa vào bảng nội bộ
-*  " (Chỉ cần check các tab cho phép Edit)
-*  IF go_grid_hdr_incomp IS BOUND. go_grid_hdr_incomp->check_changed_data( ). ENDIF.
-*  IF go_grid_item_incomp IS BOUND. go_grid_item_incomp->check_changed_data( ). ENDIF.
-*  IF go_grid_hdr_err IS BOUND.    go_grid_hdr_err->check_changed_data( ). ENDIF.
-*  IF go_grid_item_err IS BOUND.   go_grid_item_err->check_changed_data( ). ENDIF.
 
   " 1. Ép ALV nhả dữ liệu user vừa sửa vào bảng nội bộ
   " (Chỉ cần gọi cho các Tab đang hiển thị hoặc có thể sửa)
@@ -1134,61 +831,15 @@ FORM revalidate_data.
   " 4. Load lại dữ liệu (Để cập nhật màu sắc và chuyển Tab)
   PERFORM load_data_from_staging USING gv_current_req_id.
 
+  " 6. [BỔ SUNG QUAN TRỌNG]: Vẽ lại ALV để thấy sự thay đổi (Màu sắc, Icon)
+  " Nếu không có dòng này, màn hình sẽ không đổi màu dù dữ liệu bên dưới đã đổi.
+  PERFORM refresh_all_alvs.
+
   " 5. Bật cờ để PBO vẽ lại màn hình
   gv_data_loaded = abap_true.
 
-  MESSAGE 'Re-validation completed.' TYPE 'S'.
+  MESSAGE 'Data saved & re-validated.' TYPE 'S'.
 ENDFORM.
-*&---------------------------------------------------------------------*
-*& Form resubmit_file
-*&---------------------------------------------------------------------*
-*& Allows user to select a new file directly from Screen 200,
-*& then uploads, validates, classifies, and refreshes the ALVs.
-*&---------------------------------------------------------------------*
-*& -->  p1        text
-*& <--  p2        text
-*&---------------------------------------------------------------------*
-*FORM resubmit_file .
-*   zcl_mass_so_logger_213=>log_action( iv_action = 'RESUBMIT_START' iv_status = 'INFO' iv_msg = 'User triggered resubmit file.' ).
-*   DATA: lv_filepath TYPE rlgrap-filename.
-*
-*  " Step 1: Ask user to select the new Excel file
-*  PERFORM open_file_dialog CHANGING lv_filepath.
-*
-*  " Step 2: Check if a file was selected
-*  IF lv_filepath IS INITIAL.
-*    MESSAGE 'Resubmit cancelled by user or no file selected.' TYPE 'I'.
-*    RETURN. " Stop processing if no file chosen
-*  ENDIF.
-*
-*  " Step 3: Clear all existing data from internal tables
-*  CLEAR: gt_so_header, gt_so_item,
-*         gt_so_header_comp, gt_so_item_comp,
-*         gt_so_header_incomp, gt_so_item_incomp,
-*         gt_so_header_err, gt_so_item_err.
-*  " Optional: Clear gt_staging if needed
-*
-*  " Step 5: Check if data was read from the new file
-*  IF gt_so_header IS INITIAL AND gt_so_item IS INITIAL.
-*    MESSAGE 'No data found in the newly selected file or file read failed.' TYPE 'W'.
-*    " Still need to refresh ALVs to show they are empty now
-*    PERFORM refresh_all_alvs.
-*    RETURN.
-*  ENDIF.
-*
-*  DATA: lv_user_canceled TYPE abap_bool. " <<< THÊM: Khai báo cờ
-*
-*  " Step 6: Validate and Classify the NEW data
-*  PERFORM validate_and_classify_data CHANGING
-*      lv_user_canceled. " This will refill _comp/_incomp/_err tables
-*
-*  " Step 7: Refresh all ALV displays with the new classified data
-*  PERFORM refresh_all_alvs.
-*
-*  " Step 8: Show the summary popup for the NEW file
-**  PERFORM show_validation_summary.
-*   PERFORM update_status_counts.
-*ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form clear_displayed_data
 *&---------------------------------------------------------------------*
@@ -1270,8 +921,8 @@ FORM perform_save_staging.
     " Use popup for no data message too
     CALL FUNCTION 'POPUP_TO_DISPLAY_TEXT'
       EXPORTING
-        titel        = 'Information'
-        textline1    = 'No data available to save.'.
+        titel     = 'Information'
+        textline1 = 'No data available to save.'.
 *        popup_type   = 'ICON_INFORMATION'.
     RETURN.
   ENDIF.
@@ -1290,8 +941,8 @@ FORM perform_save_staging.
     DATA(lv_success_msg) = |Saved { lv_dbcnt_h } header(s) and { lv_dbcnt_i } item(s) to staging tables successfully.|.
     CALL FUNCTION 'POPUP_TO_DISPLAY_TEXT'
       EXPORTING
-        titel        = 'Save Successful'
-        textline1    = lv_success_msg.
+        titel     = 'Save Successful'
+        textline1 = lv_success_msg.
 *        popup_type   = 'ICON_INFORMATION'. " Or ICON_MESSAGE_SUCCESS
 
     " --- Log Success ---
@@ -1310,10 +961,10 @@ FORM perform_save_staging.
     DATA(lv_error_msg) = |Error saving data to staging tables! Operation rolled back. (SUBRC H={ lv_subrc_h } / I={ lv_subrc_i })|.
     CALL FUNCTION 'POPUP_TO_DISPLAY_TEXT'
       EXPORTING
-        titel        = 'Save Failed'
-        textline1    = 'An error occurred while saving the staging data.'
-        textline2    = 'Operation has been rolled back.'
-        textline3    = |(Details: SUBRC Header={ lv_subrc_h }, Item={ lv_subrc_i })|.
+        titel     = 'Save Failed'
+        textline1 = 'An error occurred while saving the staging data.'
+        textline2 = 'Operation has been rolled back.'
+        textline3 = |(Details: SUBRC Header={ lv_subrc_h }, Item={ lv_subrc_i })|.
 *        popup_type   = 'ICON_MESSAGE_ERROR'.
 
     " --- Log Error ---
@@ -1359,447 +1010,100 @@ FORM generate_request_id CHANGING cv_req_id TYPE zsd_req_id. " (Dùng đúng Typ
   " (Tùy chọn: Nếu bạn muốn chắc chắn hơn, có thể check lại trong bảng Item)
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form PERFORM_CREATE_SALES_ORDERS
-*&---------------------------------------------------------------------*
-*& Processes records from the 'Complete' internal tables
-*& and calls BAPI_SALESORDER_CREATEFROMDAT2 to create Sales Orders.
-*&---------------------------------------------------------------------*
-*FORM perform_create_sales_orders.
-*
-*
-*  " Check if there is data in the 'Complete' tables
-*  IF gt_so_header_comp IS INITIAL.
-*    MESSAGE 'No validated ("Complete") data available to create Sales Orders.' TYPE 'I'.
-*    RETURN.
-*  ENDIF.
-*
-*  " BAPI Structures & Tables
-*  DATA: ls_header         TYPE bapisdhd1,
-*        ls_headerx        TYPE bapisdhd1x,
-*        lt_partner        TYPE STANDARD TABLE OF bapiparnr,
-*        lt_item           TYPE STANDARD TABLE OF bapisditm,
-*        lt_itemx          TYPE STANDARD TABLE OF bapisditmx,
-*        lt_sched          TYPE STANDARD TABLE OF bapischdl,
-*        lt_schedx         TYPE STANDARD TABLE OF bapischdlx,
-*        lt_cond           TYPE STANDARD TABLE OF bapicond,
-*        lt_condx          TYPE STANDARD TABLE OF bapicondx,
-*        lt_return         TYPE STANDARD TABLE OF bapiret2,
-*        lv_vbeln          TYPE vbak-vbeln, " Created Sales Document
-*        lv_commit_needed  TYPE abap_bool,
-*        lv_errors_occurred TYPE abap_bool.
-*
-*  " Summary Counters
-*  DATA: lv_success_count TYPE i,
-*        lv_error_count   TYPE i.
-*
-*  FIELD-SYMBOLS: <h_comp> LIKE LINE OF gt_so_header_comp,
-*                 <i_comp> LIKE LINE OF gt_so_item_comp.
-*
-*  CLEAR gt_result. " <<< Xóa bảng kết quả cũ trước khi bắt đầu
-*
-*  " --- Loop through each validated Header record ---
-*  LOOP AT gt_so_header_comp ASSIGNING <h_comp>.
-*
-*    CLEAR: ls_header, ls_headerx, lv_vbeln, lv_errors_occurred.
-*    REFRESH: lt_partner, lt_item, lt_itemx, lt_sched, lt_schedx, lt_cond, lt_condx, lt_return.
-*    lv_commit_needed = abap_false. " Reset flag for each SO attempt
-*
-*    " --- 3.3 Prepare BAPI Input ---
-*    " --- Header Data ---
-*    ls_header-doc_type   = <h_comp>-order_type.
-*    ls_header-sales_org  = <h_comp>-sales_org.
-*    ls_header-distr_chan = <h_comp>-sales_channel.
-*    ls_header-division   = <h_comp>-sales_div.
-*    ls_header-req_date_h = <h_comp>-request_dev_date.
-*    ls_header-purch_no_c = <h_comp>-cust_ref.
-*    ls_header-currency   = <h_comp>-currency.
-*    ls_header-pmnttrms   = <h_comp>-pmnttrms.
-**    ls_header-incoterms1 = <h_comp>-incoterms. " Field name for Incoterms
-*    ls_header-ship_cond  = <h_comp>-ship_cond.
-*    ls_header-price_date = <h_comp>-price_date.
-*    ls_header-doc_date   = <h_comp>-order_date. " Document Date
-*    ls_header-sales_off  = <h_comp>-sales_off.
-*    ls_header-sales_grp  = <h_comp>-sales_grp.
-*    " Add other relevant header fields if needed
-*
-**    " --- Header X-Flags (Mark fields to be updated) ---
-**    ls_headerx = VALUE #( doc_type = 'X' sales_org = 'X' distr_chan = 'X' division = 'X'
-**                          req_date_h = 'X' purch_no_c = 'X' currency = 'X'
-**                          pmnttrms = 'X' incoterms1 = 'X' ship_cond = 'X'
-**                          price_date = 'X' doc_date = 'X'
-**                          sales_off = COND #( WHEN ls_header-sales_off IS NOT INITIAL THEN 'X' ) " Only if provided
-**                          sales_grp = COND #( WHEN ls_header-sales_grp IS NOT INITIAL THEN 'X' ) " Only if provided
-**                        ).
-*
-*     " --- Header X-Flags (Mark fields to be updated) ---
-*    ls_headerx = VALUE #( doc_type = 'X' sales_org = 'X' distr_chan = 'X' division = 'X'
-*                          req_date_h = 'X' purch_no_c = 'X' currency = 'X'
-*                          pmnttrms = 'X' ship_cond = 'X'
-*                          price_date = 'X' doc_date = 'X'
-*                          sales_off = COND #( WHEN ls_header-sales_off IS NOT INITIAL THEN 'X' ) " Only if provided
-*                          sales_grp = COND #( WHEN ls_header-sales_grp IS NOT INITIAL THEN 'X' ) " Only if provided
-*                        ).
-*
-*
-*    " --- Partner Data ---
-*    DATA(lv_sold_to) = <h_comp>-sold_to_party.
-*    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_sold_to IMPORTING output = lv_sold_to.
-*    APPEND VALUE #( partn_role = 'AG' partn_numb = lv_sold_to ) TO lt_partner.
-*    APPEND VALUE #( partn_role = 'WE' partn_numb = lv_sold_to ) TO lt_partner. " Assuming Ship-to = Sold-to
-*    " Add other partners (PY, RE) if necessary and available
-*
-*    " --- Item Data Loop ---
-*    LOOP AT gt_so_item_comp ASSIGNING <i_comp> WHERE temp_id = <h_comp>-temp_id.
-*      DATA(lv_posnr) = <i_comp>-item_no.
-*      IF lv_posnr IS INITIAL. lv_posnr = ( lines( lt_item ) + 1 ) * 10. ENDIF.
-*
-*      " --- Items ---
-*      APPEND VALUE #( itm_number = lv_posnr
-*                      material   = <i_comp>-matnr
-*                      target_qty = <i_comp>-quantity
-*                      target_qu  = <i_comp>-unit
-*                      plant      = <i_comp>-plant
-*                      store_loc  = <i_comp>-store_loc
-*                      short_text = <i_comp>-short_text ) TO lt_item.
-*      " --- Item X-Flags ---
-*      APPEND VALUE #( itm_number = lv_posnr material = 'X' target_qty = 'X' target_qu = 'X'
-*                      plant = 'X' store_loc = 'X'
-*                      short_text = COND #( WHEN <i_comp>-short_text IS NOT INITIAL THEN 'X' )
-*                    ) TO lt_itemx.
-*
-*      " --- Schedule Lines ---
-*      APPEND VALUE #( itm_number = lv_posnr
-*                      req_qty    = <i_comp>-quantity " Assuming full qty on req date
-*                      req_date   = <i_comp>-req_date ) TO lt_sched.
-*      APPEND VALUE #( itm_number = lv_posnr req_qty = 'X' req_date = 'X' ) TO lt_schedx.
-*
-*      " --- Conditions (Optional - if provided) ---
-*      IF <i_comp>-cond_type IS NOT INITIAL AND <i_comp>-unit_price IS NOT INITIAL.
-*        APPEND VALUE #( itm_number = lv_posnr
-*                        cond_type  = <i_comp>-cond_type
-*                        cond_value = <i_comp>-unit_price
-*                        currency   = <h_comp>-currency ) " Use header currency
-*                        TO lt_cond.
-*        APPEND VALUE #( itm_number = lv_posnr cond_type = <i_comp>-cond_type
-*                        cond_value = 'X' currency = 'X' ) TO lt_condx.
-*      ENDIF.
-*    ENDLOOP. " End Item Loop
-*
-*    " --- 3.4 Call BAPI Create SO ---
-*    CALL FUNCTION 'BAPI_SALESORDER_CREATEFROMDAT2'
-*      EXPORTING
-*        order_header_in    = ls_header
-*        order_header_inx   = ls_headerx
-*        behave_when_error  = 'P' " <<< Important: Process next order on error
-** LOGIC_SWITCH       = VALUE bapisdls( pricing = 'G' ) " Optional: Suppress output determination
-*      IMPORTING
-*        salesdocument      = lv_vbeln
-*      TABLES
-*        return             = lt_return
-*        order_items_in     = lt_item
-*        order_items_inx    = lt_itemx
-*        order_partners     = lt_partner
-*        order_schedules_in = lt_sched
-*        order_schedules_inx = lt_schedx
-*        order_conditions_in = lt_cond
-*        order_conditions_inx = lt_condx.
-*
-*    " --- 3.5 Process BAPI Return ---
-*    LOOP AT lt_return ASSIGNING FIELD-SYMBOL(<ret>) WHERE type CA 'AEX'. " Thêm ASSIGNING " Check for Abort, Error, Termination (X)
-*      lv_errors_occurred = abap_true.
-*      EXIT.
-*    ENDLOOP.
-*
-*    "xong 1 cái
-*    DATA: ls_result LIKE LINE OF gt_result.
-*    MOVE-CORRESPONDING <h_comp> TO ls_result. " Điền thông tin cơ bản
-*    " --- THÊM CÁC DÒNG GÁN DỮ LIỆU BỊ THIẾU ---
-*    ls_result-temp_id = <h_comp>-temp_id.
-*    ls_result-vkorg   = <h_comp>-sales_org.
-*    ls_result-vtweg   = <h_comp>-sales_channel.
-*    ls_result-spart   = <h_comp>-sales_div.
-*    " --- KẾT THÚC THÊM ---
-*    ls_result-sold_to  = lv_sold_to.
-*    ls_result-ship_to  = lv_sold_to.
-*    ls_result-qty      = lines( lt_item ).
-*    ls_result-bstkd    = <h_comp>-cust_ref.
-*    ls_result-req_date = <h_comp>-request_dev_date.
-*
-*    " --- 3.6 Commit/Rollback ---
-*    IF lv_errors_occurred = abap_false AND lv_vbeln IS NOT INITIAL.
-*      lv_commit_needed = abap_true. " Mark for commit
-*      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
-*        EXPORTING
-*          wait = abap_true.
-*      IF sy-subrc <> 0.
-*         " Commit failed - treat as error
-*         lv_errors_occurred = abap_true.
-*         MESSAGE 'Critical Error: BAPI_TRANSACTION_COMMIT failed.' TYPE 'E'.
-*         APPEND VALUE #( type = 'E' message = 'BAPI COMMIT failed after SO creation attempt.' ) TO lt_return.
-*
-*         " <<< SỬA LỖI: Điền kết quả LỖI COMMIT >>>
-*         ls_result-vbeln   = lv_vbeln. " Vẫn có số SO nhưng bị lỗi commit
-*         ls_result-status  = 'Failed (Commit)'.
-*         ls_result-message = 'Critical Error: BAPI_TRANSACTION_COMMIT failed.'.
-*         APPEND ls_result TO gt_result. " <<< APPEND LỖI COMMIT Ở ĐÂY
-*      ELSE.
-*        lv_success_count = lv_success_count + 1.
-*        <h_comp>-sales_order = lv_vbeln. " Store SO number back
-*        <h_comp>-status_code = 'P'.      " Mark as Processed
-*        <h_comp>-status_text = 'Processed'.
-*        <h_comp>-message     = |SO { lv_vbeln } created.|.
-*        LOOP AT gt_so_item_comp ASSIGNING <i_comp> WHERE temp_id = <h_comp>-temp_id.
-*            <i_comp>-sales_order = lv_vbeln. " Store SO number
-*            <i_comp>-status_code = 'P'.      " Mark item as processed
-*            <i_comp>-status_text = 'Processed'.
-*        ENDLOOP.
-*
-*        " --- >>> ADD THIS CALL <<< ---
-*        " Try to create outbound delivery automatically
-*        PERFORM perform_auto_delivery USING lv_vbeln
-*                                      CHANGING <h_comp>. " Pass <h_comp> to update status/message
-*        " --- >>> END ADDITION <<< ---
-*
-*        " <<< SỬA LỖI: Điền kết quả THÀNH CÔNG (sau khi auto-delivery đã cập nhật <h_comp>) >>>
-*        ls_result-vbeln   = lv_vbeln.
-*        ls_result-status  = <h_comp>-status_text. " Sẽ là 'Delivered' hoặc 'Warning'
-*        ls_result-message = <h_comp>-message.     " Sẽ là "SO... Deliv..." hoặc "SO... Deliv Failed..."
-*        APPEND ls_result TO gt_result. " <<< APPEND THÀNH CÔNG Ở ĐÂY
-*      ENDIF.
-*    ELSE.
-*      " Errors occurred OR BAPI didn't return a document number
-*      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-*      lv_error_count = lv_error_count + 1.
-*      <h_comp>-status_code = 'X'. " Mark as Failed
-*      <h_comp>-status_text = 'Failed'.
-*      " Concatenate error messages
-*      CLEAR <h_comp>-message.
-*      LOOP AT lt_return ASSIGNING FIELD-SYMBOL(<fs_ret>) WHERE type CA 'AEXW'. " Show Errors/Warnings
-*        <h_comp>-message = |{ <h_comp>-message } { <fs_ret>-message } / |. " <<< Sửa ở đây nữa
-*      ENDLOOP.
-*      CONDENSE <h_comp>-message.
-*       LOOP AT gt_so_item_comp ASSIGNING <i_comp> WHERE temp_id = <h_comp>-temp_id.
-*            <i_comp>-status_code = 'X'. " Mark item as failed
-*            <i_comp>-status_text = 'Failed'.
-*       ENDLOOP.
-*      " <<< SỬA LỖI: Điền kết quả LỖI BAPI >>>
-*       ls_result-vbeln   = ''. " Không có số SO
-*       ls_result-status  = 'Failed (BAPI)'.
-*       ls_result-message = <h_comp>-message. " Message lỗi BAPI
-*       APPEND ls_result TO gt_result. " <<< APPEND LỖI BAPI Ở ĐÂY
-*    ENDIF.
-*
-*    DATA: lv_log_reqid_param LIKE zso_log_213-req_id.
-*    lv_log_reqid_param = <h_comp>-req_id.
-*
-*    " --- 3.8 Log Results ---
-*    zcl_mass_so_logger_213=>log_bapiret2(
-*        it_return = lt_return
-*        iv_reqid  = lv_log_reqid_param " <<< Assumes REQ_ID exists!
-*        iv_action = 'CREATE_SO'
-*        iv_status = COND #( WHEN lv_errors_occurred = abap_true THEN 'FAILED' ELSE 'SUCCESS' )
-*        iv_commit = abap_false ). " Commit happens explicitly above or not at all
-*
-**    " --- 3.7 Update Z Table (if REQ_ID exists) ---
-**    IF <h_comp>-req_id IS NOT INITIAL.
-**        UPDATE ztb_so_heder_213 SET proc_status = <h_comp>-status_code,
-**                                    sales_order = <h_comp>-sales_order " Will be blank on failure
-**                              WHERE req_id = @<h_comp>-req_id.
-**        UPDATE ztb_so_item_213 SET proc_status = <h_comp>-status_code " Use header status for items
-**                             WHERE req_id = @<h_comp>-req_id.
-**        IF lv_commit_needed = abap_true.
-**           COMMIT WORK. " Commit Z table update separately AFTER BAPI commit
-**        ENDIF.
-**    ENDIF.
-*
-*     " --- 3.7 Save/Update Staging Table Status ---
-*    " We use MODIFY which handles both INSERT (if not saved before)
-*    " and UPDATE (if saved before) based on the primary key (MANDT, REQ_ID)
-*    DATA: ls_header_db TYPE ztb_so_heder_213, " <<< Use TYPE db_table_name
-*          ls_item_db   TYPE ztb_so_item_213, " <<< Use TYPE db_table_name
-*          lt_items_db  TYPE STANDARD TABLE OF ztb_so_item_213.
-*
-*    " Prepare header record for DB update/insert
-*    MOVE-CORRESPONDING <h_comp> TO ls_header_db.
-*    ls_header_db-proc_status = <h_comp>-status_code. " Should be 'P' or 'X'
-*    ls_header_db-sales_order = <h_comp>-sales_order. " SO Number or blank
-*
-*    MODIFY ztb_so_heder_213 FROM ls_header_db.
-*    IF sy-subrc <> 0.
-*      " Log error updating header staging table
-*       zcl_mass_so_logger_213=>log_action(
-*          iv_reqid  = lv_log_reqid_param
-*          iv_action = 'UPDATE_STG_HDR'
-*          iv_status = 'ERROR'
-*          iv_msgty  = 'E'
-*          iv_msg    = |Error updating ZTB_SO_HEDER_213 for REQ_ID { <h_comp>-req_id }. SUBRC={ sy-subrc }| ).
-*    ENDIF.
-*
-*    " Prepare item records for DB update/insert
-*    CLEAR lt_items_db.
-*    LOOP AT gt_so_item_comp ASSIGNING <i_comp> WHERE req_id = <h_comp>-req_id AND status_code = <h_comp>-status_code. " Items that just got processed/failed
-*         MOVE-CORRESPONDING <i_comp> TO ls_item_db.
-*         ls_item_db-proc_status = <i_comp>-status_code. " 'P' or 'X'
-*         ls_item_db-sales_order = <i_comp>-sales_order. " SO Number or blank
-*         APPEND ls_item_db TO lt_items_db.
-*    ENDLOOP.
-*    LOOP AT gt_so_item_err ASSIGNING <i_comp> WHERE req_id = <h_comp>-req_id AND status_code = 'X'. " Also update items moved to Error tab in this run
-*        READ TABLE lt_items_db TRANSPORTING NO FIELDS WITH KEY item_no = <i_comp>-item_no.
-*        IF sy-subrc <> 0. " Avoid duplicates if already added
-*             MOVE-CORRESPONDING <i_comp> TO ls_item_db.
-*             ls_item_db-proc_status = <i_comp>-status_code. " 'X'
-*             ls_item_db-sales_order = <i_comp>-sales_order.
-*             APPEND ls_item_db TO lt_items_db.
-*        ENDIF.
-*    ENDLOOP.
-*
-*    IF lt_items_db IS NOT INITIAL.
-*       MODIFY ztb_so_item_213 FROM TABLE @lt_items_db.
-*       IF sy-subrc <> 0.
-*         " Log error updating item staging table
-*         zcl_mass_so_logger_213=>log_action(
-*            iv_reqid  = lv_log_reqid_param
-*            iv_action = 'UPDATE_STG_ITM'
-*            iv_status = 'ERROR'
-*            iv_msgty  = 'E'
-*            iv_msg    = |Error updating ZTB_SO_ITEM_213 for REQ_ID { <h_comp>-req_id }. SUBRC={ sy-subrc }| ).
-*       ENDIF.
-*    ENDIF.
-*
-*    " Commit the Z table update only if the BAPI itself was committed
-*    IF lv_commit_needed = abap_true.
-*       COMMIT WORK. " Commit Z table changes
-*    ELSE.
-*       " If BAPI failed and rolled back, maybe rollback Z table changes too?
-*       " Or leave them as 'X' status? Current logic leaves them as 'X'.
-*       COMMIT WORK. " Commit the 'X' status update to Z tables
-*    ENDIF.
-*
-*
-*  ENDLOOP. " End Header Loop
-*
-**  " --- 3.11 Display Summary ---
-**  DATA lv_summary_msg TYPE string.
-**  lv_summary_msg = |Processing finished: { lv_success_count } Sales Order(s) created, { lv_error_count } failed.|.
-**  CALL FUNCTION 'POPUP_TO_DISPLAY_TEXT'
-**    EXPORTING
-**      titel     = 'Sales Order Creation Results'
-**      textline1 = lv_summary_msg
-**      textline2 = 'Check ALV and Log (Table ZSO_LOG_213) for details.'.
-*
-*   " --- 3.11 Display Summary ---
-*   PERFORM display_result_popup_alv. " <<< GỌI FORM MỚI
-*
-*  " --- 3.12 Refresh ALV ---
-*  " Move failed records from _comp to _err tables *before* refreshing
-*  LOOP AT gt_so_header_comp ASSIGNING <h_comp> WHERE status_code = 'X'.
-*     APPEND <h_comp> TO gt_so_header_err.
-*  ENDLOOP.
-*  DELETE gt_so_header_comp WHERE status_code = 'X'.
-*
-*  LOOP AT gt_so_item_comp ASSIGNING <i_comp> WHERE status_code = 'X'.
-*     APPEND <i_comp> TO gt_so_item_err.
-*  ENDLOOP.
-*  DELETE gt_so_item_comp WHERE status_code = 'X'.
-*
-*  " Update Icons again for potentially moved/updated records
-*  PERFORM set_icons_classified_data.
-*
-*  PERFORM refresh_all_alvs.
-*
-*
-*ENDFORM.
-
-*&---------------------------------------------------------------------*
-*& Form PERFORM_CREATE_SALES_ORDERS (Batch Processing)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM perform_create_sales_orders.
 
-  " 1. Biến cục bộ
-  DATA: ls_header_in     TYPE bapisdhd1,
-        ls_header_inx    TYPE bapisdhd1x,
-        lt_items_in      TYPE TABLE OF bapisditm,
-        lt_items_inx     TYPE TABLE OF bapisditmx,
-        lt_partners      TYPE TABLE OF bapiparnr,
-        lt_schedules_in  TYPE TABLE OF bapischdl,
-        lt_schedules_inx TYPE TABLE OF bapischdlx,
-        lt_conditions_in TYPE TABLE OF bapicond,
+  " 1. Khai báo biến
+  DATA: ls_header_in      TYPE bapisdhd1,
+        ls_header_inx     TYPE bapisdhd1x,
+        lt_items_in       TYPE TABLE OF bapisditm,
+        lt_items_inx      TYPE TABLE OF bapisditmx,
+        lt_partners       TYPE TABLE OF bapiparnr,
+        lt_schedules_in   TYPE TABLE OF bapischdl,
+        lt_schedules_inx  TYPE TABLE OF bapischdlx,
+        lt_conditions_in  TYPE TABLE OF bapicond,
         lt_conditions_inx TYPE TABLE OF bapicondx,
-        lt_return        TYPE TABLE OF bapiret2.
+        lt_return         TYPE TABLE OF bapiret2.
 
-  DATA: lv_vbtyp TYPE vbak-vbtyp.
+  DATA: lt_incomplete     TYPE TABLE OF bapiincomp,
+        ls_incomplete     TYPE bapiincomp.
 
-  DATA: lv_salesdocument TYPE vbak-vbeln. " (Dùng biến đơn)
-  DATA: lv_item_no       TYPE posnr_va.
-  DATA: lt_bapi_errors   TYPE ztty_validation_error. " Bảng lỗi để gọi Logger
+  DATA: lv_salesdocument   TYPE vbak-vbeln,
+        lv_item_no         TYPE posnr_va,
+        lt_bapi_errors     TYPE ztty_validation_error,
+        lv_vbtyp           TYPE vbak-vbtyp,
+        lv_bus_obj         TYPE char10,
+        lv_has_child_error TYPE abap_bool.
 
-  " Cờ kiểm tra lỗi con
-  DATA: lv_has_child_error TYPE abap_bool.
-
-  " Check xem có dữ liệu để xử lý không
   IF gt_hd_val IS INITIAL.
-    MESSAGE 'No data in Validated tab to process.' TYPE 'S' DISPLAY LIKE 'W'.
+    MESSAGE 'No validated data available to process.' TYPE 'S' DISPLAY LIKE 'W'.
     RETURN.
   ENDIF.
 
-  " --- 2. VÒNG LẶP XỬ LÝ HÀNG LOẠT (BATCH LOOP) ---
-  " Chỉ xử lý các dòng có Status là READY hoặc INCOMP (Cảnh báo)
-  " Bỏ qua các dòng ERROR hoặc NEW (chưa validate)
-
+  " --- 2. LOOP XỬ LÝ ---
   LOOP AT gt_hd_val ASSIGNING FIELD-SYMBOL(<fs_hd>)
        WHERE status = 'READY' OR status = 'INCOMP'.
 
-    " Clear biến cho vòng lặp mới
-    CLEAR: ls_header_in, ls_header_inx, lv_salesdocument.
+    " [FIX]: Dọn dẹp bộ nhớ triệt để trước khi xử lý đơn mới
+    CALL FUNCTION 'SD_SALES_DOCUMENT_INIT'
+      EXPORTING
+        status_buffer_refresh = 'X'
+        refresh_v45i          = 'X'.
+              .
+    CLEAR: ls_header_in, ls_header_inx, lv_salesdocument, lv_vbtyp, lv_bus_obj, lv_has_child_error.
     REFRESH: lt_items_in, lt_items_inx, lt_partners, lt_schedules_in,
-             lt_schedules_inx, lt_conditions_in, lt_conditions_inx, lt_return, lt_bapi_errors.
+             lt_schedules_inx, lt_conditions_in, lt_conditions_inx,
+             lt_return, lt_bapi_errors, lt_incomplete.
 
-    " ========================================================
-    " [LOGIC MỚI]: KIỂM TRA LỖI CỦA ITEM & CONDITION TRƯỚC
-    " ========================================================
-
-    " A. Kiểm tra Item con có lỗi không?
-    LOOP AT gt_it_val TRANSPORTING NO FIELDS
-         WHERE temp_id = <fs_hd>-temp_id
-           AND status  = 'ERROR'.
-      lv_has_child_error = abap_true.
-      EXIT.
+    " A. CHECK LỖI CON
+    LOOP AT gt_it_val TRANSPORTING NO FIELDS WHERE temp_id = <fs_hd>-temp_id AND status = 'ERROR'.
+      lv_has_child_error = abap_true. EXIT.
     ENDLOOP.
-
-    " B. Kiểm tra Condition con có lỗi không?
     IF lv_has_child_error = abap_false.
-      LOOP AT gt_pr_val TRANSPORTING NO FIELDS
-           WHERE temp_id = <fs_hd>-temp_id
-             AND status  = 'ERROR'.
-        lv_has_child_error = abap_true.
-        EXIT.
+      LOOP AT gt_pr_val TRANSPORTING NO FIELDS WHERE temp_id = <fs_hd>-temp_id AND status = 'ERROR'.
+        lv_has_child_error = abap_true. EXIT.
       ENDLOOP.
     ENDIF.
-
-    " ==> NẾU CÓ LỖI CON -> BỎ QUA (SKIP) KHÔNG GỌI BAPI
     IF lv_has_child_error = abap_true.
-      " (Tùy chọn: Cập nhật message cho Header để user biết tại sao không chạy)
-      <fs_hd>-message = 'Skipped: Contains items or conditions with errors.'.
-
-      " Cập nhật DB để lần sau load lên thấy message này (nhưng vẫn giữ status cũ)
+      <fs_hd>-message = 'Skipped: Contains items/conditions with errors.'.
       UPDATE ztb_so_upload_hd SET message = <fs_hd>-message
         WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
-
-      CONTINUE. " Nhảy sang Header tiếp theo
+      CONTINUE.
     ENDIF.
 
-    " ========================================================
-    " A. MAPPING DỮ LIỆU (Staging -> BAPI Structures)
-    " ========================================================
+    " B. CHECK LOẠI CHỨNG TỪ
+    DATA(lv_auart) = <fs_hd>-order_type.
+    TRANSLATE lv_auart TO UPPER CASE.
+    CONDENSE lv_auart NO-GAPS.
 
-    " --- Header ---
-    ls_header_in-doc_type   = <fs_hd>-order_type.
-    ls_header_in-sales_org  = <fs_hd>-sales_org.
+    SELECT SINGLE vbtyp FROM tvak INTO lv_vbtyp WHERE auart = lv_auart.
+
+    " [FIX GOTO]: Xử lý lỗi ngay tại đây thay vì nhảy label
+    IF sy-subrc <> 0.
+      <fs_hd>-message = |Order Type { lv_auart } not found in TVAK|.
+      <fs_hd>-status  = 'FAILED'.
+      <fs_hd>-icon    = icon_led_red.
+
+      " [FIX ICON]: Bỏ cột ICON ra khỏi câu lệnh UPDATE
+      UPDATE ztb_so_upload_hd
+        SET status = 'FAILED'
+            message = <fs_hd>-message
+        WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
+
+      " Update Item/Cond con thành Failed
+      UPDATE ztb_so_upload_it SET status = 'FAILED' WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
+      UPDATE ztb_so_upload_pr SET status = 'FAILED' WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
+
+      CONTINUE. " Bỏ qua, sang dòng tiếp theo
+    ENDIF.
+
+    " C. MAPPING DỮ LIỆU
+    " ... (Các logic Mapping giữ nguyên) ...
+    ls_header_in-doc_type = lv_auart.
+    ls_header_in-sales_org = <fs_hd>-sales_org.
     ls_header_in-distr_chan = <fs_hd>-sales_channel.
-    ls_header_in-division   = <fs_hd>-sales_div.
-    ls_header_in-sales_grp  = <fs_hd>-sales_grp.
-    ls_header_in-sales_off  = <fs_hd>-sales_off.
+    ls_header_in-division = <fs_hd>-sales_div.
+*    ls_header_in-ord_reason = <fs_hd>-order_reason.
     ls_header_in-req_date_h = <fs_hd>-req_date.
     ls_header_in-price_date = <fs_hd>-price_date.
     ls_header_in-purch_no_c = <fs_hd>-cust_ref.
@@ -1807,340 +1111,162 @@ FORM perform_create_sales_orders.
     ls_header_in-incoterms1 = <fs_hd>-incoterms.
     ls_header_in-incoterms2 = <fs_hd>-inco2.
     ls_header_in-currency   = <fs_hd>-currency.
-*    ls_header_in-ord_reason = <fs_hd>-order_reason. " [MỚI] Map Order Reason
 
-    " Header X Flags
-    ls_header_inx-doc_type   = 'X'.
-    ls_header_inx-sales_org  = 'X'.
-    ls_header_inx-distr_chan = 'X'.
-    ls_header_inx-division   = 'X'.
-    ls_header_inx-req_date_h = 'X'.
-    ls_header_inx-purch_no_c = 'X'.
-    ls_header_inx-updateflag = 'I'. " Insert
-    IF <fs_hd>-sales_grp  IS NOT INITIAL. ls_header_inx-sales_grp  = 'X'. ENDIF.
-    IF <fs_hd>-sales_off  IS NOT INITIAL. ls_header_inx-sales_off  = 'X'. ENDIF.
-    IF <fs_hd>-price_date IS NOT INITIAL. ls_header_inx-price_date = 'X'. ENDIF.
-    IF <fs_hd>-pmnttrms   IS NOT INITIAL. ls_header_inx-pmnttrms   = 'X'. ENDIF.
-    IF <fs_hd>-incoterms  IS NOT INITIAL. ls_header_inx-incoterms1 = 'X'. ENDIF.
-    IF <fs_hd>-inco2      IS NOT INITIAL. ls_header_inx-incoterms2 = 'X'. ENDIF.
-    IF <fs_hd>-currency   IS NOT INITIAL. ls_header_inx-currency   = 'X'. ENDIF.
-*    IF <fs_hd>-order_reason IS NOT INITIAL. ls_header_inx-ord_reason = 'X'. ENDIF. " [MỚI]
-
-    " --- Partners ---
     APPEND VALUE #( partn_role = 'AG' partn_numb = <fs_hd>-sold_to_party ) TO lt_partners.
     APPEND VALUE #( partn_role = 'WE' partn_numb = <fs_hd>-sold_to_party ) TO lt_partners.
 
-        " --- [FIX LỖI BAPI]: KIỂM TRA LOẠI CHỨNG TỪ ---
-    " Lấy Category của Order Type (C = Order, K = Credit Memo, L = Debit Memo)
-    SELECT SINGLE vbtyp FROM tvak INTO lv_vbtyp WHERE auart = <fs_hd>-order_type.
-
-    " --- Items ---
-    " (Lấy từ bảng gt_it_val tương ứng với Header này)
     LOOP AT gt_it_val ASSIGNING FIELD-SYMBOL(<fs_it>) WHERE temp_id = <fs_hd>-temp_id.
-      lv_item_no = <fs_it>-item_no.
-
-      APPEND VALUE #( itm_number = lv_item_no material = <fs_it>-material plant = <fs_it>-plant store_loc = <fs_it>-store_loc target_qty = <fs_it>-quantity target_qu = <fs_it>-unit ) TO lt_items_in.
-      APPEND VALUE #( itm_number = lv_item_no material = 'X' plant = 'X' store_loc = 'X' target_qty = 'X' target_qu = 'X' updateflag = 'I' ) TO lt_items_inx.
-
-      " --- [LOGIC QUAN TRỌNG]: CHỈ TẠO SCHEDULE LINE NẾU LÀ STANDARD ORDER ---
-      " (Debit/Credit Memo category K/L không dùng Schedule Line trong BAPI này)
-
-      IF lv_vbtyp <> 'K' AND lv_vbtyp <> 'L'.
+       lv_item_no = <fs_it>-item_no.
+       APPEND VALUE #( itm_number = lv_item_no material = <fs_it>-material target_qty = <fs_it>-quantity target_qu = <fs_it>-unit plant = <fs_it>-plant store_loc = <fs_it>-store_loc ) TO lt_items_in.
+       IF lv_vbtyp = 'C' OR lv_vbtyp = 'H' OR lv_vbtyp = 'I'.
          APPEND VALUE #( itm_number = lv_item_no req_qty = <fs_it>-quantity ) TO lt_schedules_in.
-         APPEND VALUE #( itm_number = lv_item_no req_qty = 'X' ) TO lt_schedules_inx.
-      ENDIF.
-
-*      " Schedule Line
-*      APPEND VALUE #( itm_number = lv_item_no req_qty = <fs_it>-quantity ) TO lt_schedules_in.
-*      APPEND VALUE #( itm_number = lv_item_no req_qty = 'X' ) TO lt_schedules_inx.
+       ENDIF.
     ENDLOOP.
 
-    " --- Conditions ---
     LOOP AT gt_pr_val ASSIGNING FIELD-SYMBOL(<fs_pr>) WHERE temp_id = <fs_hd>-temp_id.
        APPEND VALUE #( itm_number = <fs_pr>-item_no cond_type = <fs_pr>-cond_type cond_value = <fs_pr>-amount currency = <fs_pr>-currency cond_unit = <fs_pr>-uom cond_p_unt = <fs_pr>-per ) TO lt_conditions_in.
-       APPEND VALUE #( itm_number = <fs_pr>-item_no cond_type = <fs_pr>-cond_type cond_value = 'X' currency = 'X' cond_unit = 'X' cond_p_unt = 'X' updateflag = 'I' ) TO lt_conditions_inx.
     ENDLOOP.
 
-    " ========================================================
-    " B. GỌI BAPI CREATE
-    " ========================================================
-    CALL FUNCTION 'BAPI_SALESORDER_CREATEFROMDAT2'
-      EXPORTING
-        order_header_in     = ls_header_in
-        order_header_inx    = ls_header_inx
-      IMPORTING
-        salesdocument       = lv_salesdocument
-      TABLES
-        return              = lt_return
-        order_items_in      = lt_items_in
-        order_items_inx     = lt_items_inx
-        order_partners      = lt_partners
-        order_schedules_in  = lt_schedules_in
-        order_schedules_inx = lt_schedules_inx
-        order_conditions_in = lt_conditions_in
-        order_conditions_inx = lt_conditions_inx.
+    " D. GỌI HÀM (Unified)
+    CASE lv_vbtyp.
+      WHEN 'C'. lv_bus_obj = 'BUS2032'.
+      WHEN 'H'. lv_bus_obj = 'BUS2102'.
+      WHEN 'I'. lv_bus_obj = 'BUS2032'.
+      WHEN 'K'. lv_bus_obj = 'BUS2094'.
+      WHEN 'L'. lv_bus_obj = 'BUS2096'.
+      WHEN 'G'. lv_bus_obj = 'BUS2034'.
+      WHEN OTHERS. lv_bus_obj = 'BUS2032'.
+    ENDCASE.
 
-    " ========================================================
-    " C. XỬ LÝ KẾT QUẢ & GHI LOG Z-TABLE
-    " ========================================================
+    CALL FUNCTION 'SD_SALESDOCUMENT_CREATE'
+      EXPORTING sales_header_in = ls_header_in business_object = lv_bus_obj
+      IMPORTING salesdocument_ex = lv_salesdocument
+      TABLES return = lt_return sales_items_in = lt_items_in sales_partners = lt_partners sales_schedules_in = lt_schedules_in sales_conditions_in = lt_conditions_in incomplete_log = lt_incomplete
+      EXCEPTIONS others = 1.
 
+    " E. XỬ LÝ KẾT QUẢ
     IF lv_salesdocument IS NOT INITIAL.
-      " === CASE 1: TẠO SO THÀNH CÔNG ===
+      " === SUCCESS ===
       CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = 'X'.
 
-      " 1. Cập nhật Header Staging
       <fs_hd>-status   = 'SUCCESS'.
       <fs_hd>-vbeln_so = lv_salesdocument.
-      <fs_hd>-message  = |Sales Order { lv_salesdocument } created.|.
 
-      " 2. Gọi Auto-Delivery (Logic cũ của bạn)
-      PERFORM perform_auto_delivery USING lv_salesdocument CHANGING <fs_hd>.
-      " (Form trên sẽ update tiếp vbeln_dlv và message nếu delivery thành công/thất bại)
+      IF lt_incomplete IS NOT INITIAL.
+         <fs_hd>-message = |Doc { lv_salesdocument } created (Incomplete). Check Log.|.
+         <fs_hd>-icon    = icon_led_yellow.
 
-      " 3. Update DB Header
-      UPDATE ztb_so_upload_hd SET status = 'SUCCESS' vbeln_so = lv_salesdocument vbeln_dlv = <fs_hd>-vbeln_dlv message = <fs_hd>-message
+         DELETE FROM ztb_so_error_log WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
+
+         LOOP AT lt_incomplete INTO ls_incomplete.
+            CALL METHOD zcl_sd_mass_logger=>save_single_error
+              EXPORTING
+                iv_req_id    = <fs_hd>-req_id
+                iv_temp_id   = <fs_hd>-temp_id
+                iv_item_no   = COND #( WHEN ls_incomplete-itm_number IS INITIAL THEN '000000' ELSE ls_incomplete-itm_number )
+                iv_fieldname = ls_incomplete-field_name
+                iv_msg_type  = 'W'
+                iv_message   = |Field { ls_incomplete-field_text } is missing|.
+         ENDLOOP.
+      ELSE.
+         <fs_hd>-message = |Doc { lv_salesdocument } created successfully.|.
+         <fs_hd>-icon    = icon_led_green.
+         DELETE FROM ztb_so_error_log WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
+
+         IF <fs_hd>-icon = icon_led_green AND ( lv_vbtyp = 'C' OR lv_vbtyp = 'I' OR lv_vbtyp = 'H' ).
+            PERFORM perform_auto_delivery USING lv_salesdocument CHANGING <fs_hd>.
+         ENDIF.
+      ENDIF.
+
+      " [FIX ICON]: Xóa cột ICON trong câu lệnh UPDATE
+      UPDATE ztb_so_upload_hd
+        SET status = 'SUCCESS'
+            vbeln_so = lv_salesdocument
+            vbeln_dlv = <fs_hd>-vbeln_dlv
+            message = <fs_hd>-message
+*            icon      = <fs_hd>-icon  " <<< Nhớ update cột này
         WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
 
-      " 4. Update DB Item & Cond (Đồng bộ status Success)
       UPDATE ztb_so_upload_it SET status = 'SUCCESS' WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
       UPDATE ztb_so_upload_pr SET status = 'SUCCESS' WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
 
-      " 5. Xóa Log cũ trong bảng Error (vì đã thành công)
-      DELETE FROM ztb_so_error_log WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
-
+       " [FIX]: Commit lần nữa cho chắc chắn việc update bảng Z (Dù BAPI Commit đã chạy)
+      COMMIT WORK.
     ELSE.
-      " === CASE 2: TẠO SO THẤT BẠI (FAILED) ===
+      " === FAILED ===
       CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-
       <fs_hd>-status = 'FAILED'.
+      <fs_hd>-icon   = icon_led_red.
 
-*      " 1. Lọc message lỗi BAPI để hiển thị lên Header
-*      LOOP AT lt_return INTO DATA(ls_ret) WHERE type = 'E' OR type = 'A'.
-*        <fs_hd>-message = ls_ret-message. " Lấy lỗi đầu tiên
-*
-*        " 2. [QUAN TRỌNG] Map lỗi BAPI vào bảng ZTB_SO_ERROR_LOG
-*        " Để tô màu ô lỗi và hiển thị chi tiết
-*        APPEND VALUE #(
-*           req_id    = <fs_hd>-req_id
-*           temp_id   = <fs_hd>-temp_id
-*           " Logic Map Item No (Nếu message trả về Row, cần map lại Item No thật)
-*           " Ở đây tạm để 000000 nếu là lỗi chung
-*           item_no   = COND #( WHEN ls_ret-parameter = 'ORDER_ITEMS_IN' THEN '000010' ELSE '000000' )
-*           fieldname = 'BAPI_ERROR' " Hoặc map chi tiết nếu được
-*           msg_type  = 'E'
-*           message   = ls_ret-message
-**           log_user  = sy-uname
-**           log_date  = sy-datum
-*        ) TO lt_bapi_errors.
-*      ENDLOOP.
-*
-*      IF <fs_hd>-message IS INITIAL. <fs_hd>-message = 'BAPI Failed unknown'. ENDIF.
-*
-*      " 3. [SỬA LỖI]: Gọi Class Logger thay vì INSERT trực tiếp
-*      IF lt_bapi_errors IS NOT INITIAL.
-*        " Class Logger sẽ tự động điền User, Date, Status='UNFIXED' và Insert vào DB
-*        CALL METHOD zcl_sd_mass_logger=>save_errors_to_db
-*          EXPORTING
-*            it_errors = lt_bapi_errors.
-*      ENDIF.
+      " [THÊM MỚI]: Xóa sạch log lỗi CŨ của riêng dòng này trước khi ghi lỗi MỚI
+      " Để tránh việc lỗi cũ (đã sửa) vẫn còn tồn tại lai rai
+      DELETE FROM ztb_so_error_log
+        WHERE req_id  = <fs_hd>-req_id
+          AND temp_id = <fs_hd>-temp_id.
 
-
-      " 1. Lọc message lỗi BAPI
       LOOP AT lt_return INTO DATA(ls_ret) WHERE type = 'E' OR type = 'A'.
-        <fs_hd>-message = ls_ret-message. " Lấy lỗi đầu tiên hiển thị lên Header
+        <fs_hd>-message = ls_ret-message.
 
-        " 2. [SỬA LỖI]: Chỉ điền các trường có trong ZSTR_VALIDATION_ERROR
-        APPEND VALUE #(
+        " [FIX LOGIC MAPPING]: Map trường BAPI sang trường Z để tô màu được
+        DATA: lv_z_fieldname TYPE fieldname.
+
+        CASE ls_ret-parameter.
+           WHEN 'ORDER_HEADER_IN'.
+              IF ls_ret-field = 'DOC_TYPE'.   lv_z_fieldname = 'ORDER_TYPE'. ENDIF.
+              IF ls_ret-field = 'SALES_ORG'.  lv_z_fieldname = 'SALES_ORG'.  ENDIF.
+              IF ls_ret-field = 'DISTR_CHAN'. lv_z_fieldname = 'DIST_CHNL'.  ENDIF.
+              IF ls_ret-field = 'DIVISION'.   lv_z_fieldname = 'DIVISION'.   ENDIF.
+              IF ls_ret-field = 'REQ_DATE_H'. lv_z_fieldname = 'REQ_DATE'.   ENDIF.
+              " ... Thêm các trường khác ...
+           WHEN 'ORDER_ITEMS_IN'.
+              IF ls_ret-field = 'MATERIAL'.   lv_z_fieldname = 'MATERIAL'.   ENDIF.
+              IF ls_ret-field = 'TARGET_QTY'. lv_z_fieldname = 'QUANTITY'.   ENDIF.
+              IF ls_ret-field = 'PLANT'.      lv_z_fieldname = 'PLANT'.      ENDIF.
+           WHEN OTHERS.
+              lv_z_fieldname = 'BAPI_ERROR'. " Không tô màu cụ thể, chỉ báo đỏ dòng
+        ENDCASE.
+
+
+*        APPEND VALUE #( req_id = <fs_hd>-req_id temp_id = <fs_hd>-temp_id item_no = '000000' fieldname = 'BAPI_ERROR' msg_type = 'E' message = ls_ret-message ) TO lt_bapi_errors.
+          APPEND VALUE #(
            req_id    = <fs_hd>-req_id
            temp_id   = <fs_hd>-temp_id
-           item_no   = COND #( WHEN ls_ret-parameter = 'ORDER_ITEMS_IN' THEN '000010' ELSE '000000' )
-           fieldname = 'BAPI_ERROR'
+           item_no   = COND #( WHEN ls_ret-parameter CS 'ITEM' THEN '000010' ELSE '000000' ) " (Cần logic map Row index chuẩn hơn nếu nhiều item)
+           fieldname = lv_z_fieldname " <-- Dùng tên đã map
            msg_type  = 'E'
            message   = ls_ret-message
-           " [ĐÃ XÓA]: log_user, log_date, status (Vì structure không có)
         ) TO lt_bapi_errors.
+
       ENDLOOP.
-
-      IF <fs_hd>-message IS INITIAL. <fs_hd>-message = 'BAPI Failed unknown'. ENDIF.
-
-      " 3. [SỬA LỖI]: Gọi Class Logger thay vì INSERT trực tiếp
+      IF <fs_hd>-message IS INITIAL. <fs_hd>-message = 'Creation Failed'. ENDIF.
       IF lt_bapi_errors IS NOT INITIAL.
-        " Class Logger sẽ tự động điền User, Date, Status='UNFIXED' và Insert vào DB
-        CALL METHOD zcl_sd_mass_logger=>save_errors_to_db
-          EXPORTING
-            it_errors = lt_bapi_errors.
+        CALL METHOD zcl_sd_mass_logger=>save_errors_to_db EXPORTING it_errors = lt_bapi_errors.
       ENDIF.
 
+      " [FIX ICON]: Xóa cột ICON trong câu lệnh UPDATE
+      UPDATE ztb_so_upload_hd
+        SET status = 'FAILED'
+            message = <fs_hd>-message
+        WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
 
-      " 4. Update DB Header/Item/Cond -> FAILED
-      UPDATE ztb_so_upload_hd SET status = 'FAILED' message = <fs_hd>-message WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
       UPDATE ztb_so_upload_it SET status = 'FAILED' WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
       UPDATE ztb_so_upload_pr SET status = 'FAILED' WHERE req_id = <fs_hd>-req_id AND temp_id = <fs_hd>-temp_id.
 
+      " [FIX 2]: QUAN TRỌNG NHẤT - COMMIT WORK
+      " Phải Commit để lưu trạng thái FAILED và Log Lỗi vào DB ngay lập tức.
+      " Nếu không có dòng này, khi vòng lặp bị crash ở dòng sau, lỗi này sẽ mất.
+      COMMIT WORK.
     ENDIF.
 
-  ENDLOOP. " End Loop qua danh sách Validated
-
-  " ========================================================
-  " 3. REFRESH UI (Tự động chuyển Tab)
-  " ========================================================
-  " Sau khi loop xong, DB đã được cập nhật (READY -> SUCCESS/FAILED).
-  " Ta gọi lại hàm load data, nó sẽ tự động chia bài lại vào các bảng gt_..._suc/fail.
+  ENDLOOP.
 
   PERFORM load_data_from_staging USING gv_current_req_id.
-
-  " Bật cờ để PBO vẽ lại (Status Bar & ALV)
   gv_data_loaded = abap_true.
-
-  MESSAGE 'Processing completed. Please check Success/Failed tabs.' TYPE 'S'.
+  MESSAGE 'Processing completed.' TYPE 'S'.
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form PERFORM_AUTO_DELIVERY
-*&---------------------------------------------------------------------*
-*& Tries to create an outbound delivery for a single, successfully
-*& created Sales Order.
-*&---------------------------------------------------------------------*
-*FORM perform_auto_delivery USING iv_vbeln_so TYPE vbak-vbeln
-*                           CHANGING cs_header   TYPE ty_header. " Để cập nhật status
-*
-*  DATA lv_log_reqid_param LIKE zso_log_213-req_id. " <<< THÊM DÒNG NÀY
-*  lv_log_reqid_param = cs_header-req_id.
-*
-*  DATA: lt_items        TYPE TABLE OF bapidlvreftosalesorder,
-*        ls_item         TYPE bapidlvreftosalesorder,
-*        lv_ship_point   TYPE vstel,
-*        lv_due_date     TYPE dats,
-*        lt_return       TYPE TABLE OF bapiret2,
-*        ls_return       TYPE bapiret2,
-*        lv_delivery     TYPE likp-vbeln,
-*        lv_count        TYPE bapidlvcreateheader-num_deliveries,
-*        lv_msg          TYPE string.
-*
-*  DATA: lt_vbap TYPE TABLE OF vbap,
-*        ls_vbap LIKE LINE OF lt_vbap.
-*
-*  "--- Lấy thông tin item (đặc biệt là Shipping Point) từ SO vừa tạo
-*  SELECT vbeln, posnr, kwmeng, vrkme, vstel
-*  INTO CORRESPONDING FIELDS OF TABLE @lt_vbap  " <<< THÊM VÀO ĐÂY
-*  FROM vbap
-*  WHERE vbeln = @iv_vbeln_so AND kwmeng > 0.
-*  IF sy-subrc <> 0 OR lt_vbap IS INITIAL.
-*    cs_header-message = |SO { iv_vbeln_so } created, but no items found for delivery.|.
-*    RETURN.
-*  ENDIF.
-*
-*  "--- Kiểm tra logic nhiều shipping point (GIỐNG HỆT CODE CŨ) ---
-*  DATA(lt_vstel_check) = lt_vbap.
-*  SORT lt_vstel_check BY vstel.
-*  DELETE ADJACENT DUPLICATES FROM lt_vstel_check COMPARING vstel.
-*  IF lines( lt_vstel_check ) > 1.
-*    cs_header-status_code = 'W'. " SO Created, but Delivery Failed
-*    cs_header-status_text = 'Warning'.
-*    cs_header-message     = |SO { iv_vbeln_so } created, but ❌ Delivery failed: Multiple shipping points in SO.|.
-*    " Ghi log lỗi Delivery
-*    zcl_mass_so_logger_213=>log_action(
-*        iv_reqid  = lv_log_reqid_param " <<< SỬA Ở ĐÂY
-*        iv_action = 'CREATE_DELIVERY' iv_status = 'FAILED' iv_msgty  = 'E'
-*        iv_msg    = |SO { iv_vbeln_so }: Multiple shipping points.|
-*        iv_commit = abap_true ).
-*    RETURN.
-*  ENDIF.
-*
-*  " Lấy Shipping Point (giờ đã chắc chắn là duy nhất)
-*  READ TABLE lt_vstel_check INTO DATA(ls_vstel_line) INDEX 1.
-*  lv_ship_point = ls_vstel_line-vstel.
-*  IF lv_ship_point IS INITIAL.
-*     cs_header-status_code = 'W'.
-*     cs_header-status_text = 'Warning'.
-*     cs_header-message     = |SO { iv_vbeln_so } created, but ❌ Delivery failed: No Shipping Point found.|.
-*     RETURN.
-*  ENDIF.
-*
-*  "--- Lấy delivery date (GIỐNG HỆT CODE CŨ) ---
-*  SELECT MIN( edatu ) INTO @lv_due_date
-*    FROM vbep WHERE vbeln = @iv_vbeln_so.
-*  IF lv_due_date IS INITIAL.
-*    lv_due_date = sy-datum.
-*  ENDIF.
-*
-*  "--- Build item table for BAPI (GIỐNG HỆT CODE CŨ) ---
-*  LOOP AT lt_vbap INTO ls_vbap.
-*    CLEAR ls_item.
-*    ls_item-ref_doc    = ls_vbap-vbeln.
-*    ls_item-ref_item   = ls_vbap-posnr.
-*    ls_item-dlv_qty    = ls_vbap-kwmeng. " Delivery Qty = Order Qty
-*    ls_item-sales_unit = ls_vbap-vrkme.
-*    APPEND ls_item TO lt_items.
-*  ENDLOOP.
-*
-*  "--- Call BAPI to create Delivery ---
-*  CALL FUNCTION 'BAPI_OUTB_DELIVERY_CREATE_SLS'
-*    EXPORTING
-*      ship_point      = lv_ship_point
-*      due_date        = lv_due_date
-*    IMPORTING
-*      delivery        = lv_delivery
-*      num_deliveries  = lv_count
-*    TABLES
-*      sales_order_items = lt_items
-*      return          = lt_return.
-*
-*  "--- Build message log
-*  LOOP AT lt_return INTO ls_return WHERE message IS NOT INITIAL.
-*    CONCATENATE lv_msg ls_return-message INTO lv_msg SEPARATED BY ' | '.
-*  ENDLOOP.
-*
-*  IF lv_delivery IS NOT INITIAL.
-*    CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = abap_true.
-*    WAIT UP TO 1 SECONDS. " Giữ lại WAIT của bạn
-*
-*    cs_header-status_code = 'D'. " 'Delivered'
-*    cs_header-status_text = 'Delivered'.
-*    cs_header-message = |SO { iv_vbeln_so } created. ✅ Delivery { lv_delivery } created.|.
-*
-*    PERFORM save_delivery_to_ztable
-*      USING iv_vbeln_so             " SO Number
-*            lv_delivery             " Delivery Number
-*            lv_ship_point
-*            lv_due_date
-*            cs_header-sales_org
-*            cs_header-sales_channel
-*            cs_header-sales_div
-*            cs_header-sold_to_party
-*            cs_header-sold_to_party " Assuming Ship-to = Sold-to
-*            cs_header-cust_ref
-*            lv_msg.
-*
-*    " Ghi log thành công Delivery
-*    zcl_mass_so_logger_213=>log_action(
-*        iv_reqid  = lv_log_reqid_param " <<< SỬA Ở ĐÂY
-*        iv_action = 'CREATE_DELIVERY' iv_status = 'SUCCESS' iv_msgty  = 'S'
-*        iv_msg    = |SO { iv_vbeln_so }: Delivery { lv_delivery } created.|
-*        iv_commit = abap_true ).
-*  ELSE.
-*    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-*    cs_header-status_code = 'W'. " SO Created, but Delivery Failed
-*    cs_header-status_text = 'Warning'.
-*    IF lv_msg IS INITIAL.
-*      lv_msg = |❌ Failed to create delivery for SO { iv_vbeln_so }.|.
-*    ENDIF.
-*    cs_header-message = |SO { iv_vbeln_so } created. { lv_msg }|.
-*
-*    " Ghi log lỗi Delivery
-*    zcl_mass_so_logger_213=>log_action(
-*        iv_reqid  = lv_log_reqid_param " <<< SỬA Ở ĐÂY
-*        iv_action = 'CREATE_DELIVERY' iv_status = 'FAILED' iv_msgty  = 'E'
-*        iv_msg    = |SO { iv_vbeln_so }: { lv_msg }|
-*        iv_commit = abap_true ).
-*  ENDIF.
-*
-*ENDFORM.
-
-*&---------------------------------------------------------------------*
-*& Form PERFORM_AUTO_DELIVERY (Updated for Staging Architecture)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM perform_auto_delivery
   USING    iv_vbeln_so TYPE vbak-vbeln
   CHANGING cs_header   TYPE ty_header. " (Bao gồm ZTB_SO_UPLOAD_HD)
@@ -2254,9 +1380,7 @@ FORM perform_auto_delivery
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form PERFORM_AUTO_PICK_DELIVERY (Logic từ ZSD4_AUTO_PICKED)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM perform_auto_pick_delivery
   USING    iv_vbeln_dlv TYPE likp-vbeln
   CHANGING cs_header    TYPE ty_header.
@@ -2376,38 +1500,40 @@ FORM save_delivery_to_ztable
 
 ENDFORM.
 
+
 FORM load_tracking_data.
+
+  CALL FUNCTION 'BUFFER_REFRESH_ALL'.
 
   CLEAR gt_tracking.
 
-  " 1. Chuẩn hóa input (thêm số 0 vào trước nếu cần)
+  " 1. Chuẩn hóa input
   PERFORM normalize_search_inputs.
 
-  "=========================================================
-  " [MỚI] LOGIC TÌM NGƯỢC SO TỪ DELIVERY/BILLING
-  "=========================================================
+  " =========================================================
+  " [LOGIC] TÌM NGƯỢC SO TỪ DELIVERY/BILLING
+  " =========================================================
   DATA: lr_so_range TYPE RANGE OF vbak-vbeln,
         ls_so_range LIKE LINE OF lr_so_range.
-
   DATA: lv_search_active TYPE abap_bool.
 
-  " A. Nếu user nhập Sales Order -> Thêm vào Range
+  " A. Nếu user nhập Sales Order
   IF gv_vbeln IS NOT INITIAL.
-    ls_so_range-sign   = 'I'.
-    ls_so_range-option = 'EQ'.
-    ls_so_range-low    = gv_vbeln.
+    ls_so_range-sign = 'I'. ls_so_range-option = 'EQ'. ls_so_range-low = gv_vbeln.
     APPEND ls_so_range TO lr_so_range.
     lv_search_active = abap_true.
   ENDIF.
 
-  " B. Nếu user nhập Delivery -> Tìm SO cha trong VBFA
+  " ---------------------------------------------------------
+  " B. Nếu user nhập Delivery
+  " ---------------------------------------------------------
   IF gv_deliv IS NOT INITIAL.
     lv_search_active = abap_true.
-    " Thêm @ trước biến gv_deliv
-    SELECT SINGLE vbelv INTO @ls_so_range-low
-      FROM vbfa
+
+    " Điều kiện: vbtyp_n IN ('J', 'T') để đảm bảo input đúng là Delivery hoặc Return Delivery.
+    SELECT SINGLE vbelv INTO @ls_so_range-low FROM vbfa
       WHERE vbeln   = @gv_deliv
-        AND vbtyp_v = 'C'. " C = Order
+        AND vbtyp_n IN ('J', 'T').
 
     IF sy-subrc = 0.
       ls_so_range-sign = 'I'. ls_so_range-option = 'EQ'.
@@ -2415,31 +1541,22 @@ FORM load_tracking_data.
     ENDIF.
   ENDIF.
 
-  " C. Nếu user nhập Billing -> Tìm SO (có thể qua trung gian Delivery)
+  " C. Nếu user nhập Billing
   IF gv_bill IS NOT INITIAL.
     lv_search_active = abap_true.
     DATA: lv_pre_doc TYPE vbeln_von,
           lv_cat     TYPE vbtyp.
 
-    " Tìm cha trực tiếp của Billing (SỬA LỖI Ở ĐÂY: Thêm @ toàn bộ)
-    SELECT SINGLE vbelv, vbtyp_v
-      INTO (@lv_pre_doc, @lv_cat)
-      FROM vbfa
-      WHERE vbeln   = @gv_bill
-        AND vbtyp_n = 'M'. " M = Invoice
+    SELECT SINGLE vbelv, vbtyp_v INTO (@lv_pre_doc, @lv_cat) FROM vbfa
+      WHERE vbeln = @gv_bill AND vbtyp_n = 'M'.
 
     IF sy-subrc = 0.
       IF lv_cat = 'C'.
-        " Cha là Order -> Thêm luôn
         ls_so_range-sign = 'I'. ls_so_range-option = 'EQ'. ls_so_range-low = lv_pre_doc.
         APPEND ls_so_range TO lr_so_range.
       ELSEIF lv_cat = 'J'.
-        " Cha là Delivery -> Tìm tiếp ông nội (Order)
-        " (SỬA LỖI Ở ĐÂY: Thêm @ trước biến lv_pre_doc)
-        SELECT SINGLE vbelv INTO @ls_so_range-low
-          FROM vbfa
-          WHERE vbeln   = @lv_pre_doc
-            AND vbtyp_v = 'C'.
+        SELECT SINGLE vbelv INTO @ls_so_range-low FROM vbfa
+          WHERE vbeln = @lv_pre_doc AND vbtyp_v = 'C'.
         IF sy-subrc = 0.
           ls_so_range-sign = 'I'. ls_so_range-option = 'EQ'.
           APPEND ls_so_range TO lr_so_range.
@@ -2448,32 +1565,30 @@ FORM load_tracking_data.
     ENDIF.
   ENDIF.
 
-  " [QUAN TRỌNG] Nếu có nhập search key (SO/Del/Bill) mà không tìm thấy SO nào
-  " -> Thì gán giá trị 'DUMMY' để Query không ra kết quả (tránh việc Select All)
+  " Nếu có nhập Search (SO/Del/Bill) mà tìm không ra -> Gán số ảo để List rỗng
   IF lv_search_active = abap_true AND lr_so_range IS INITIAL.
-     ls_so_range-sign = 'I'. ls_so_range-option = 'EQ'. ls_so_range-low = '0000000000'.
-     APPEND ls_so_range TO lr_so_range.
+    ls_so_range-sign = 'I'. ls_so_range-option = 'EQ'. ls_so_range-low = '0000000000'.
+    APPEND ls_so_range TO lr_so_range.
   ENDIF.
 
-  "=========================================================
-  " 2. KHAI BÁO RANGE CHO 3 SALES ORG (Logic cũ)
-  "=========================================================
+  " =========================================================
+  " 2. KHAI BÁO RANGE CHO 3 SALES ORG
+  " =========================================================
   DATA: lr_vkorg_project TYPE RANGE OF vkorg.
-  lr_vkorg_project = VALUE #( sign = 'I' option = 'EQ'
-                             ( low = 'CNSG' ) ( low = 'CNHN' ) ( low = 'CNDN' ) ).
+  lr_vkorg_project = VALUE #( sign = 'I' option = 'EQ' ( low = 'CNSG' ) ( low = 'CNHN' ) ( low = 'CNDN' ) ).
 
-  "=========================================================
-  " 3. XỬ LÝ BIẾN SEARCH INPUT KHÁC
-  "=========================================================
+  " =========================================================
+  " 3. XỬ LÝ BIẾN SEARCH INPUT
+  " =========================================================
   CONDENSE: gv_vkorg, gv_vtweg, gv_spart, gv_ernam.
   TRANSLATE: gv_vkorg TO UPPER CASE, gv_vtweg TO UPPER CASE,
              gv_spart TO UPPER CASE, gv_ernam TO UPPER CASE.
   DATA(lv_vtweg_pattern) = |%{ gv_vtweg }|.
   DATA(lv_spart_pattern) = |%{ gv_spart }|.
 
-  "=========================================================
+  " =========================================================
   " 4. SELECT DỮ LIỆU CHÍNH
-  "=========================================================
+  " =========================================================
   SELECT DISTINCT
          vbak~vbeln   AS sales_document,
          vbak~auart   AS order_type,
@@ -2488,103 +1603,238 @@ FORM load_tracking_data.
          vbep~edatu   AS req_delivery_date
     FROM vbak
     LEFT JOIN vbap ON vbap~vbeln = vbak~vbeln
-    LEFT JOIN vbep ON vbep~vbeln = vbap~vbeln
-                  AND vbep~posnr = vbap~posnr
+    LEFT JOIN vbep ON vbep~vbeln = vbap~vbeln AND vbep~posnr = vbap~posnr
    WHERE ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-     AND vbak~vkorg IN @lr_vkorg_project  " Lọc cứng dự án
+     AND vbak~vkorg IN @lr_vkorg_project
      AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
      AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
      AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
      AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
      AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-     " --- Range SO ---
      AND vbak~vbeln IN @lr_so_range
     INTO CORRESPONDING FIELDS OF TABLE @gt_tracking.
 
-  " Sắp xếp và xóa trùng
-  SORT gt_tracking BY document_date DESCENDING sales_document.
+  " Sắp xếp SO mới nhất lên đầu (document_date DESC, sales_document DESC)
+  SORT gt_tracking BY document_date DESCENDING sales_document DESCENDING.
   DELETE ADJACENT DUPLICATES FROM gt_tracking COMPARING sales_document.
 
-  "=========================================================
-  " 5. LOGIC CHI TIẾT TRONG LOOP (Tìm lại Deliv/Bill/FI để hiển thị)
-  "=========================================================
-  FIELD-SYMBOLS: <fs_tracking> TYPE ty_tracking.
+  " =========================================================
+  " 5. LOGIC CHI TIẾT TRONG LOOP
+  " =========================================================
+  DATA: lt_tracking_final TYPE STANDARD TABLE OF ty_tracking,
+        ls_row            TYPE ty_tracking,
+        ls_vbfa_del       TYPE vbfa.
 
-  LOOP AT gt_tracking ASSIGNING <fs_tracking>.
-    DATA ls_vbfa_del TYPE vbfa.
+  CLEAR lt_tracking_final.
 
-    " Clear dữ liệu cũ
-    CLEAR: <fs_tracking>-delivery_document, <fs_tracking>-billing_document,
-           <fs_tracking>-fi_doc_billing, <fs_tracking>-bill_doc_cancel,
-           <fs_tracking>-fi_doc_cancel, <fs_tracking>-release_flag.
+  LOOP AT gt_tracking INTO ls_row.
+    " Clear sạch các biến output
+    CLEAR: ls_row-delivery_document, ls_row-billing_document,
+           ls_row-fi_doc_billing, ls_row-bill_doc_cancel,
+           ls_row-fi_doc_cancel, ls_row-release_flag.
 
-    " --- LOGIC PHÂN LOẠI SALES ORDER TYPE ---
-    CASE <fs_tracking>-order_type.
+    CASE ls_row-order_type.
+        " -------------------------------------------------------
+        " NHÓM ZRAS: LOGIC PLAN-CENTRIC
+        " -------------------------------------------------------
+      WHEN 'ZRAS'.
+        DATA: lv_has_entry TYPE abap_bool.
+        lv_has_entry = abap_false.
 
-      " NHÓM 1 & 2: CÓ DELIV (Standard & Return)
-      WHEN 'ZORR' OR 'ZBB' OR 'ZFOC' OR 'ZRET'.
+        TYPES: BEGIN OF ty_bill_sort,
+                 vbeln TYPE vbeln_vf,
+                 erdat TYPE erdat,
+               END OF ty_bill_sort.
 
-        CLEAR ls_vbfa_del.
-        DATA(lv_vbtyp_target) = COND vbtyp( WHEN <fs_tracking>-order_type = 'ZRET' THEN 'T' ELSE 'J' ).
+        DATA: lt_bill_sort TYPE STANDARD TABLE OF ty_bill_sort,
+              ls_bill_sort TYPE ty_bill_sort.
 
-        SELECT SINGLE vbeln, vbtyp_n
+        REFRESH lt_bill_sort.
+        SELECT vbeln, erdat
+          INTO CORRESPONDING FIELDS OF TABLE @lt_bill_sort
           FROM vbfa
-          INTO CORRESPONDING FIELDS OF @ls_vbfa_del
-          WHERE vbelv   = @<fs_tracking>-sales_document
-            AND vbtyp_n = @lv_vbtyp_target. " J hoặc T
-
-        IF sy-subrc = 0.
-          <fs_tracking>-delivery_document = ls_vbfa_del-vbeln.
-
-          " Tìm Billing từ Delivery
-          SELECT SINGLE vbeln
-            FROM vbfa
-            INTO @<fs_tracking>-billing_document
-            WHERE vbelv   = @<fs_tracking>-delivery_document
-              AND vbtyp_n IN ('M', 'O', 'P'). " M: Invoice, O: Credit, P: Debit
-        ENDIF.
-
-      " NHÓM 3: KHÔNG DELIVERY (Service, Debit, Credit...)
-      WHEN OTHERS.
-        " Tìm Billing TRỰC TIẾP từ SO
-        SELECT SINGLE vbeln
-          FROM vbfa
-          INTO @<fs_tracking>-billing_document
-          WHERE vbelv   = @<fs_tracking>-sales_document
+          WHERE vbelv   = @ls_row-sales_document
             AND vbtyp_n IN ('M', 'O', 'P').
 
+        " Sắp xếp Billing theo ngày tạo để map dần vào Plan (FIFO)
+        SORT lt_bill_sort BY erdat ASCENDING vbeln ASCENDING.
+
+        " --- LẤY TOÀN BỘ PLAN ---
+        TYPES: BEGIN OF ty_plan_data,
+                 afdat TYPE fplt-afdat, " Plan Date
+                 nfdat TYPE fplt-nfdat, " Billing date
+                 fksaf TYPE fplt-fksaf, " Billing status
+                 faksp TYPE fplt-faksp, " Billing block
+                 fpltr TYPE fplt-fpltr, " Item number
+               END OF ty_plan_data.
+
+        DATA: lt_fplt TYPE STANDARD TABLE OF ty_plan_data,
+              ls_plan TYPE ty_plan_data.
+
+        SELECT c~afdat, c~nfdat, c~fksaf, c~faksp, c~fpltr
+          INTO CORRESPONDING FIELDS OF TABLE @lt_fplt
+          FROM vbkd AS a
+          INNER JOIN fpla AS b ON b~fplnr = a~fplnr
+          INNER JOIN fplt AS c ON c~fplnr = b~fplnr
+          WHERE a~vbeln = @ls_row-sales_document
+            AND a~posnr = '000000'.
+
+        IF sy-subrc = 0.
+          SORT lt_fplt BY afdat fpltr.
+
+          LOOP AT lt_fplt INTO ls_plan.
+            CLEAR: ls_row-delivery_document, ls_row-billing_document,
+                   ls_row-fi_doc_billing, ls_row-bill_doc_cancel,
+                   ls_row-fi_doc_cancel, ls_row-release_flag.
+
+            ls_row-req_delivery_date = ls_plan-afdat.
+
+            " --- Logic FIFO: Lấy bill có sẵn gán vào ---
+            READ TABLE lt_bill_sort INTO ls_bill_sort INDEX 1.
+            IF sy-subrc = 0.
+              ls_row-billing_document = ls_bill_sort-vbeln.
+
+              IF ls_bill_sort-erdat <> ls_plan-afdat.
+                ls_row-process_phase = |Billing Created ({ ls_bill_sort-erdat DATE = USER })|.
+              ELSE.
+                ls_row-process_phase = 'Billing Created'.
+              ENDIF.
+
+              ls_row-phase_icon = icon_wd_text_view.
+
+              PERFORM get_fi_status CHANGING ls_row.
+
+              DELETE lt_bill_sort INDEX 1.
+            ELSE.
+              " Không còn bill nào
+              IF ls_plan-fksaf = 'C'.
+                ls_row-process_phase = 'Completed (No Doc Found)'.
+                ls_row-phase_icon    = icon_green_light.
+              ELSEIF ls_plan-faksp IS NOT INITIAL.
+                ls_row-process_phase = |Blocked Plan: { ls_plan-afdat DATE = USER }|.
+                ls_row-phase_icon    = icon_red_light.
+              ELSE.
+* ls_row-process_phase = |Ready Billing: { ls_plan-afdat DATE = USER }|.
+                ls_row-process_phase = |Order created, ready billing: { ls_plan-afdat DATE = USER }|.
+                ls_row-phase_icon    = icon_create.
+              ENDIF.
+            ENDIF.
+
+            APPEND ls_row TO lt_tracking_final.
+            lv_has_entry = abap_true.
+          ENDLOOP.
+        ENDIF.
+
+        IF lv_has_entry = abap_false.
+          ls_row-process_phase = 'Ready / No Plan'.
+          APPEND ls_row TO lt_tracking_final.
+        ENDIF.
+
+        " -------------------------------------------------------
+        " NHÓM CÓ DELIVERY (ZORR, ZBB, ZFOC, ZRET)
+        " -------------------------------------------------------
+      WHEN 'ZORR' OR 'ZBB' OR 'ZFOC' OR 'ZRET'.
+        CLEAR ls_vbfa_del.
+        DATA(lv_vbtyp_target) = COND vbtyp( WHEN ls_row-order_type = 'ZRET' THEN 'T' ELSE 'J' ).
+
+        SELECT SINGLE vbeln, vbtyp_n FROM vbfa INTO CORRESPONDING FIELDS OF @ls_vbfa_del
+          WHERE vbelv = @ls_row-sales_document AND vbtyp_n = @lv_vbtyp_target.
+
+        IF sy-subrc = 0.
+          ls_row-delivery_document = ls_vbfa_del-vbeln.
+        ENDIF.
+
+        IF ls_row-order_type = 'ZRET'.
+          " ZRET: Tìm từ SO
+          SELECT vbeln FROM vbfa INTO @ls_row-billing_document
+            WHERE vbelv   = @ls_row-sales_document
+              AND vbtyp_n IN ('M', 'O', 'P')
+            ORDER BY vbeln DESCENDING. " <--- Lấy số lớn nhất (Mới nhất)
+            EXIT. " Chỉ lấy 1 dòng
+          ENDSELECT.
+        ELSE.
+          " ZORR/ZFOC: Tìm từ Delivery
+          IF ls_row-delivery_document IS NOT INITIAL.
+            SELECT vbeln FROM vbfa INTO @ls_row-billing_document
+              WHERE vbelv   = @ls_row-delivery_document
+                AND vbtyp_n IN ('M', 'O', 'P')
+              ORDER BY vbeln DESCENDING. " <--- Lấy số lớn nhất (Mới nhất)
+              EXIT. " Chỉ lấy 1 dòng
+            ENDSELECT.
+          ENDIF.
+        ENDIF.
+
+        PERFORM get_fi_status CHANGING ls_row.
+        APPEND ls_row TO lt_tracking_final.
+
+        " -------------------------------------------------------
+        " NHÓM KHÁC (ZDR, ZCRR, ZTP, ZSC...)
+        " -------------------------------------------------------
+      WHEN OTHERS.
+        " Lấy Bill mới nhất cho nhóm Others
+        SELECT vbeln FROM vbfa INTO @ls_row-billing_document
+          WHERE vbelv = @ls_row-sales_document
+            AND vbtyp_n IN ('M', 'O', 'P')
+          ORDER BY vbeln DESCENDING. " <--- Lấy số lớn nhất
+          EXIT.
+        ENDSELECT.
+
+        PERFORM get_fi_status CHANGING ls_row.
+        APPEND ls_row TO lt_tracking_final.
+
     ENDCASE.
+  ENDLOOP.
 
-    " --- LOGIC TÌM FI DOCUMENT & CANCEL ---
-    IF <fs_tracking>-billing_document IS NOT INITIAL.
+  gt_tracking = lt_tracking_final.
+  PERFORM denormalize_search_inputs.
+ENDFORM.
 
-      DATA: lv_bill_doc_canc TYPE vbrk-vbeln.
-      CLEAR: lv_bill_doc_canc.
+" =========================================================
+" FORM LẤY FI & CANCEL
+" =========================================================
+FORM get_fi_status CHANGING cs_row TYPE ty_tracking.
 
-      " 1. Lấy FI Doc từ BKPF
-      SELECT SINGLE belnr FROM bkpf INTO @<fs_tracking>-fi_doc_billing
-        WHERE awtyp = 'VBRK' AND awkey = @<fs_tracking>-billing_document.
+  IF cs_row-billing_document IS INITIAL.
+    RETURN.
+  ENDIF.
 
-      " 2. Lấy Billing Cancelled (N <- M)
-      SELECT SINGLE vbeln FROM vbfa INTO @lv_bill_doc_canc
-        WHERE vbelv = @<fs_tracking>-billing_document
-          AND vbtyp_v = 'M' AND vbtyp_n = 'N'.
+  DATA: lv_bill_doc_canc TYPE vbrk-vbeln.
+  CLEAR: lv_bill_doc_canc.
 
-      IF sy-subrc = 0 AND lv_bill_doc_canc IS NOT INITIAL.
-        <fs_tracking>-bill_doc_cancel = lv_bill_doc_canc.
-        " 3. Lấy FI Cancel
-        SELECT SINGLE belnr FROM bkpf INTO @<fs_tracking>-fi_doc_cancel
-          WHERE awtyp = 'VBRK' AND awkey = @lv_bill_doc_canc.
-      ENDIF.
+  " 1. Lấy FI Doc từ BKPF (Dùng AWKEY)
+  SELECT SINGLE belnr FROM bkpf INTO @cs_row-fi_doc_billing
+    WHERE awtyp = 'VBRK' AND awkey = @cs_row-billing_document.
 
-      " Logic Release Flag
-      IF <fs_tracking>-fi_doc_billing IS INITIAL.
-        <fs_tracking>-release_flag = '@5C@'. " Icon đỏ/vàng tùy hệ thống
-      ENDIF.
+  " 2. Lấy Billing Cancelled (N)
+  SELECT SINGLE vbeln FROM vbfa INTO @lv_bill_doc_canc
+    WHERE vbelv   = @cs_row-billing_document
+      AND vbtyp_v IN ('M', 'O', 'P')
+      AND vbtyp_n = 'N'.
+
+  IF sy-subrc = 0 AND lv_bill_doc_canc IS NOT INITIAL.
+    cs_row-bill_doc_cancel = lv_bill_doc_canc.
+
+    " 3. Lấy FI Cancel
+    SELECT SINGLE belnr FROM bkpf INTO @cs_row-fi_doc_cancel
+      WHERE awtyp = 'VBRK' AND awkey = @lv_bill_doc_canc.
+  ENDIF.
+
+  " === [FIX MỚI]: Logic Release Flag (Cờ báo chưa có FI) ===
+  IF cs_row-fi_doc_billing IS INITIAL.
+
+    " Nếu là ZFOC thì KHÔNG báo lỗi (vì ZFOC xong ở Billing)
+    IF cs_row-order_type = 'ZFOC'.
+       CLEAR cs_row-release_flag.
+    ELSE.
+       " Các loại khác: Thiếu FI -> Báo cờ vàng
+       cs_row-release_flag = '@5C@'.
     ENDIF.
 
-  ENDLOOP.
+  ENDIF.
+
 ENDFORM.
+
+
 
 FORM apply_phase_logic.
 
@@ -2606,85 +1856,118 @@ FORM apply_phase_logic.
 
   LOOP AT gt_tracking ASSIGNING <fs_phase>.
 
-    CLEAR: <fs_phase>-process_phase, <fs_phase>-phase_icon.
+    CLEAR: <fs_phase>-phase_icon.
+    " Không clear <fs_phase>-process_phase ngay vì ZRAS cần giữ giá trị cũ nếu chưa có Bill
 
-    "=========================================================
-    " LOGIC XÁC ĐỊNH PHASE THEO NHÓM
-    "=========================================================
     CASE <fs_phase>-order_type.
+
+      "-------------------------------------------------------
+      " NHÓM ZRAS: BILLING PLAN
+      "-------------------------------------------------------
+      WHEN 'ZRAS'.
+
+        " Check Billing trước
+        IF <fs_phase>-billing_document IS NOT INITIAL AND <fs_phase>-bill_doc_cancel IS INITIAL.
+
+           IF <fs_phase>-fi_doc_billing IS NOT INITIAL.
+              <fs_phase>-process_phase = 'FI Doc created'.
+              <fs_phase>-phase_icon    = icon_payment.
+           ELSE.
+              <fs_phase>-process_phase = 'Billing created'.
+              <fs_phase>-phase_icon    = icon_wd_text_view.
+           ENDIF.
+
+        ELSE.
+           " Nếu chưa có Billing -> Giữ nguyên logic Plan cũ
+           IF <fs_phase>-process_phase IS INITIAL.
+              <fs_phase>-process_phase = 'Ready / No Plan'.
+           ENDIF.
+
+           " Gán icon cho ZRAS
+           IF <fs_phase>-phase_icon IS INITIAL.
+             IF <fs_phase>-process_phase CP 'Completed*'.
+               <fs_phase>-phase_icon = icon_green_light.
+             ELSEIF <fs_phase>-process_phase CP 'Blocked*'.
+               <fs_phase>-phase_icon = icon_red_light.
+             ELSE.
+               <fs_phase>-phase_icon = icon_create.
+             ENDIF.
+           ENDIF.
+        ENDIF.
 
       "-------------------------------------------------------
       " NHÓM 1 & 2: CÓ DELIVERY (ZORR, ZBB, ZFOC, ZRET)
       "-------------------------------------------------------
       WHEN 'ZORR' OR 'ZBB' OR 'ZFOC' OR 'ZRET'.
 
-        " Check xem đã có Billing chưa (Ưu tiên cao nhất)
-        IF <fs_phase>-billing_document IS NOT INITIAL.
-             " Đã có Billing -> Check FI
-             IF <fs_phase>-fi_doc_billing IS NOT INITIAL AND <fs_phase>-bill_doc_cancel IS INITIAL.
-                <fs_phase>-process_phase = 'FI Doc created'.
-                <fs_phase>-phase_icon    = icon_payment.
-             ELSE.
-                <fs_phase>-process_phase = 'Billing created'.
-                <fs_phase>-phase_icon    = ICON_WD_TEXT_VIEW.
-             ENDIF.
+        CLEAR <fs_phase>-process_phase.
+
+        " 1. Check Billing trước
+        IF <fs_phase>-billing_document IS NOT INITIAL AND <fs_phase>-bill_doc_cancel IS INITIAL.
+
+          " === Logic ZFOC ===
+          IF <fs_phase>-order_type = 'ZFOC'.
+            <fs_phase>-process_phase = 'Billing created (Completed)'.
+            <fs_phase>-phase_icon    = icon_green_light.
+          ELSE.
+            " Các loại khác: Phải có FI mới Xanh
+            IF <fs_phase>-fi_doc_billing IS NOT INITIAL.
+              <fs_phase>-process_phase = 'FI Doc created'.
+              <fs_phase>-phase_icon    = icon_payment.
+            ELSE.
+              <fs_phase>-process_phase = 'Billing created'.
+              <fs_phase>-phase_icon    = icon_wd_text_view.
+            ENDIF.
+          ENDIF.
 
         ELSE.
-             " Chưa có Billing -> Check Delivery Status
-             IF <fs_phase>-delivery_document IS NOT INITIAL.
+          " 2. Nếu chưa có Bill -> Check Delivery
+          IF <fs_phase>-delivery_document IS NOT INITIAL.
 
-                " Lấy Status PGI/PGR
-                CLEAR lv_wbstk.
-                SELECT SINGLE wbstk FROM likp INTO lv_wbstk
-                 WHERE vbeln = <fs_phase>-delivery_document.
+            CLEAR lv_wbstk.
+            SELECT SINGLE wbstk FROM likp INTO lv_wbstk
+              WHERE vbeln = <fs_phase>-delivery_document.
 
-                " Phân biệt text cho Return và Standard
-                IF <fs_phase>-order_type = 'ZRET'.
-                   " --- Logic cho ZRET (Return) ---
-                   IF lv_wbstk = 'C'.
-                      <fs_phase>-process_phase = 'PGR Posted, ready Billing'.
-                      <fs_phase>-phase_icon    = ICON_WD_TEXT_VIEW.
-                   ELSE.
-                      <fs_phase>-process_phase = 'Return Del created, ready PGR'.
-                      <fs_phase>-phase_icon    = icon_delivery.
-                   ENDIF.
-                ELSE.
-                   " --- Logic cho ZORR (Standard) ---
-                   IF lv_wbstk = 'C'.
-                      <fs_phase>-process_phase = 'PGI Posted, ready Billing'.
-                      <fs_phase>-phase_icon    = ICON_WD_TEXT_VIEW.
-                   ELSE.
-                      <fs_phase>-process_phase = 'Delivery created, ready PGI'.
-                      <fs_phase>-phase_icon    = icon_delivery.
-                   ENDIF.
-                ENDIF.
+            " --- Đã Post kho (PGI/PGR Xong) ---
+            IF lv_wbstk = 'C'.
+               <fs_phase>-process_phase = 'PGI/PGR Posted, ready Billing'.
+               <fs_phase>-phase_icon    = icon_wd_text_view.
 
-             ELSE.
-                " Chưa có Delivery
-                <fs_phase>-process_phase = 'Order created'.
-                <fs_phase>-phase_icon    = icon_order.
-             ENDIF.
+            " --- Chưa Post kho (Chờ PGI/PGR) ---
+            ELSE.
+               <fs_phase>-process_phase = 'Delivery created, ready PGI/PGR'.
+               <fs_phase>-phase_icon    = icon_delivery.
+            ENDIF.
+
+          ELSE.
+            " 3. Chưa có Delivery -> Trạng thái: Order created
+            <fs_phase>-process_phase = 'Order created'.
+            <fs_phase>-phase_icon    = icon_order.
+          ENDIF.
         ENDIF.
 
       "-------------------------------------------------------
-      " NHÓM 3: KHÔNG DELIVERY (ZDR, ZCRR, ZTP, ZSC, ZRAS)
+      " NHÓM 3: KHÔNG DELIVERY (ZDR, ZCRR, ZTP, ZSC...)
       "-------------------------------------------------------
       WHEN OTHERS.
 
+        CLEAR <fs_phase>-process_phase.
+
         " Nhóm này không quan tâm Delivery, check thẳng Billing
-        IF <fs_phase>-billing_document IS NOT INITIAL.
-             " Đã có Billing -> Check FI
-             IF <fs_phase>-fi_doc_billing IS NOT INITIAL AND <fs_phase>-bill_doc_cancel IS INITIAL.
-                <fs_phase>-process_phase = 'FI Doc created'.
-                <fs_phase>-phase_icon    = icon_payment.
-             ELSE.
-                <fs_phase>-process_phase = 'Billing created'.
-                <fs_phase>-phase_icon    = ICON_WD_TEXT_VIEW.
-             ENDIF.
+        IF <fs_phase>-billing_document IS NOT INITIAL AND <fs_phase>-bill_doc_cancel IS INITIAL.
+
+          IF <fs_phase>-fi_doc_billing IS NOT INITIAL.
+            <fs_phase>-process_phase = 'FI Doc created'.
+            <fs_phase>-phase_icon    = icon_payment.
+          ELSE.
+            <fs_phase>-process_phase = 'Billing created'.
+            <fs_phase>-phase_icon    = icon_wd_text_view.
+          ENDIF.
+
         ELSE.
-             " Chưa có Billing -> Trạng thái chờ Billing ngay
-             <fs_phase>-process_phase = 'Ready Billing'.
-             <fs_phase>-phase_icon    = icon_order.
+          " Chưa có Billing -> Trạng thái: Order created
+          <fs_phase>-process_phase = 'Order created'.
+          <fs_phase>-phase_icon    = icon_order.
         ENDIF.
 
     ENDCASE.
@@ -2692,9 +1975,9 @@ FORM apply_phase_logic.
   ENDLOOP.
 
 ENDFORM.
+
 FORM filter_process_phase.
 
-  " 1. Nếu không lọc (chọn 'All') hoặc bảng ALV rỗng thì thoát
   IF cb_phase IS INITIAL OR cb_phase = 'ALL' OR gt_tracking IS INITIAL.
     EXIT.
   ENDIF.
@@ -2702,46 +1985,410 @@ FORM filter_process_phase.
   DATA: lt_keep TYPE STANDARD TABLE OF ty_tracking.
   CLEAR lt_keep.
 
-  " 2. Lọc dữ liệu
   LOOP AT gt_tracking INTO gs_tracking.
 
     CASE cb_phase.
-      " --- Order Created ---
       WHEN 'ORD'.
+
         IF gs_tracking-process_phase = 'Order created'.
-           APPEND gs_tracking TO lt_keep.
+          APPEND gs_tracking TO lt_keep.
         ENDIF.
 
-      " --- Delivery Created (Bắt cả Standard & Return) ---
       WHEN 'DEL'.
-        " Sửa lỗi: So khớp chính xác chuỗi đã gán ở apply_phase_logic
-        IF gs_tracking-process_phase = 'Delivery created, ready PGI'      " Standard
-        OR gs_tracking-process_phase = 'Return Del created, ready PGR'.   " Return
-           APPEND gs_tracking TO lt_keep.
+        IF gs_tracking-process_phase CP 'Delivery created*'.
+          APPEND gs_tracking TO lt_keep.
         ENDIF.
 
-      " --- PGI/PGR Posted (Sửa lỗi Case Sensitive & thiếu PGR) ---
       WHEN 'INV'.
-        " Sửa lỗi: Chữ 'P' hoa và thêm trường hợp PGR
-        IF gs_tracking-process_phase = 'PGI Posted, ready Billing'        " Standard
-        OR gs_tracking-process_phase = 'PGR Posted, ready Billing'        " Return
-        OR gs_tracking-process_phase = 'Billing created'.                 " Trường hợp cũ chưa có FI
-           APPEND gs_tracking TO lt_keep.
+        IF gs_tracking-process_phase CP 'PGI/PGR Posted*'. " (Hoặc CP 'PGI*' OR CP 'PGR*')
+          APPEND gs_tracking TO lt_keep.
         ENDIF.
 
-      " --- Accounting / FI ---
+      WHEN 'BIL'.
+        IF gs_tracking-process_phase CP 'Billing*'.
+          APPEND gs_tracking TO lt_keep.
+        ENDIF.
+
       WHEN 'ACC'.
-        " Logic: Lấy cả 'FI Doc created' VÀ trạng thái mới 'Ready for FI'
-        IF gs_tracking-process_phase = 'FI Doc created'
-        OR gs_tracking-process_phase = 'Billing created, ready for FI doc'. " <== Phase mới
-           APPEND gs_tracking TO lt_keep.
+        IF gs_tracking-process_phase = 'FI Doc created'.
+          APPEND gs_tracking TO lt_keep.
         ENDIF.
 
       WHEN OTHERS.
-        " Giữ lại tất cả nếu key không khớp logic nào (fail-safe)
         APPEND gs_tracking TO lt_keep.
     ENDCASE.
 
+  ENDLOOP.
+
+  gt_tracking = lt_keep.
+
+ENDFORM.
+
+FORM filter_tracking_data.
+
+  DATA: lt_keep TYPE STANDARD TABLE OF ty_tracking.
+
+  TYPES: BEGIN OF ty_vbeln,
+           vbeln TYPE vbak-vbeln,
+         END OF ty_vbeln.
+
+  DATA: lv_vtweg_pattern TYPE string,
+        lv_spart_pattern TYPE string.
+
+  IF cb_sosta IS INITIAL OR cb_sosta = 'ALL' OR gt_tracking IS INITIAL.
+    EXIT.
+  ENDIF.
+
+  CLEAR lt_keep.
+  lv_vtweg_pattern = |%{ gv_vtweg }|.
+  lv_spart_pattern = |%{ gv_spart }|.
+
+
+  CASE cb_sosta.
+
+      "--- INC (Giữ nguyên) ---
+    WHEN 'INC'.
+      DATA: lt_incomplete TYPE STANDARD TABLE OF vbak-vbeln.
+      SELECT vbak~vbeln
+        FROM vbak
+        WHERE
+           ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+       AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+       AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+       AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+       AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+       AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+       AND vbak~netwr = 0
+       AND ( vbak~uvall = 'A' OR vbak~uvall = 'B' OR vbak~uvall = ' ' )
+        INTO TABLE @lt_incomplete.
+
+      IF sy-subrc = 0 AND lt_incomplete IS NOT INITIAL.
+        SORT lt_incomplete.
+        DELETE ADJACENT DUPLICATES FROM lt_incomplete.
+        LOOP AT gt_tracking INTO gs_tracking.
+          DATA(lv_vbeln_inc) = |{ gs_tracking-sales_document ALPHA = IN }|.
+          READ TABLE lt_incomplete
+               WITH KEY table_line = lv_vbeln_inc
+               BINARY SEARCH TRANSPORTING NO FIELDS.
+          IF sy-subrc = 0.
+            APPEND gs_tracking TO lt_keep.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      "--- COM (Giữ nguyên) ---
+    WHEN 'COM'.
+      DATA: lt_complete TYPE STANDARD TABLE OF vbak-vbeln.
+      SELECT DISTINCT vbak~vbeln
+        FROM vbak
+        INNER JOIN vbap ON vbap~vbeln = vbak~vbeln
+        WHERE
+           ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+       AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+       AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+       AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+       AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+       AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+       AND vbak~uvall = 'C'
+        INTO TABLE @lt_complete.
+
+      IF sy-subrc = 0.
+        SORT lt_complete.
+        LOOP AT gt_tracking INTO gs_tracking.
+          DATA(lv_vbeln_cmp) = |{ gs_tracking-sales_document ALPHA = IN }|.
+          READ TABLE lt_complete WITH KEY table_line = lv_vbeln_cmp
+                     BINARY SEARCH TRANSPORTING NO FIELDS.
+          IF sy-subrc = 0.
+            APPEND gs_tracking TO lt_keep.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      "--- BLK (Giữ nguyên) ---
+    WHEN 'BLK'.
+      DATA: lt_billing_block TYPE STANDARD TABLE OF vbak-vbeln.
+      SELECT vbak~vbeln
+        FROM vbak
+        WHERE
+           ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+       AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+       AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+       AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+       AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+       AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+       AND vbak~faksk IS NOT INITIAL
+        INTO TABLE @lt_billing_block.
+
+      SELECT DISTINCT vbak~vbeln
+        FROM vbak
+        INNER JOIN vbap ON vbap~vbeln = vbak~vbeln
+        WHERE
+           ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+       AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+       AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+       AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+       AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+       AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+       AND vbap~faksp IS NOT INITIAL
+        APPENDING TABLE @lt_billing_block.
+
+      IF lt_billing_block IS NOT INITIAL.
+        SORT lt_billing_block.
+        DELETE ADJACENT DUPLICATES FROM lt_billing_block.
+        LOOP AT gt_tracking INTO gs_tracking.
+          DATA(lv_vbeln_blk) = |{ gs_tracking-sales_document ALPHA = IN }|.
+          READ TABLE lt_billing_block
+               WITH KEY table_line = lv_vbeln_blk
+               BINARY SEARCH TRANSPORTING NO FIELDS.
+          IF sy-subrc = 0.
+            APPEND gs_tracking TO lt_keep.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      "==================================================================
+      " SỬA LỖI S/4HANA: ABSTK CHỈ CÓ Ở HEADER (VBAK)
+      "==================================================================
+    WHEN 'REJ'.
+      DATA: lt_reject_so TYPE STANDARD TABLE OF vbak-vbeln.
+
+      " 1. Lấy SO bị reject ở Header (VBAK-ABSTK)
+      SELECT vbak~vbeln
+        FROM vbak
+        WHERE
+           ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+       AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+       AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+       AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+       AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+       AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+       AND vbak~abstk IS NOT INITIAL " <== CHỈ KIỂM TRA VBAK
+        INTO TABLE @lt_reject_so.
+
+      " 2. So khớp với ALV
+      IF lt_reject_so IS NOT INITIAL.
+        SORT lt_reject_so.
+        DELETE ADJACENT DUPLICATES FROM lt_reject_so.
+        LOOP AT gt_tracking INTO gs_tracking.
+          DATA(lv_vbeln_rej) = |{ gs_tracking-sales_document ALPHA = IN }|.
+          READ TABLE lt_reject_so
+               WITH KEY table_line = lv_vbeln_rej
+               BINARY SEARCH TRANSPORTING NO FIELDS.
+          IF sy-subrc = 0.
+            APPEND gs_tracking TO lt_keep.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+  ENDCASE.
+
+  " Gán kết quả lọc vào bảng ALV
+  gt_tracking = lt_keep.
+ENDFORM.
+
+FORM filter_delivery_status.
+  " 1. Nếu không lọc (chọn 'All') hoặc bảng ALV rỗng thì thoát
+  IF cb_ddsta IS INITIAL OR cb_ddsta = 'ALL' OR gt_tracking IS INITIAL.
+    EXIT.
+  ENDIF.
+
+  DATA: lt_keep TYPE STANDARD TABLE OF ty_tracking.
+  CLEAR lt_keep.
+
+  " 2. Lấy các biến pattern cho search
+  DATA: lv_vtweg_pattern TYPE string,
+        lv_spart_pattern TYPE string.
+  lv_vtweg_pattern = |%{ gv_vtweg }|.
+  lv_spart_pattern = |%{ gv_spart }|.
+
+  CASE cb_ddsta.
+      " =========================================================
+      " [MỚI]: DELIVERY CREATED, READY PGI (Chưa Post kho)
+      " =========================================================
+    WHEN 'READY'.
+      DATA: lt_gm_ready TYPE HASHED TABLE OF vbak-vbeln
+                         WITH UNIQUE KEY table_line.
+
+      " Tìm Delivery (J/T) mà WBSTK KHÁC 'C'
+      SELECT DISTINCT vbak~vbeln
+       FROM vbak
+       INNER JOIN vbfa ON vbfa~vbelv = vbak~vbeln
+       INNER JOIN likp ON likp~vbeln = vbfa~vbeln
+       WHERE ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+         AND vbfa~vbtyp_n IN ('J', 'T')   " Delivery hoặc Return Delivery
+         AND likp~wbstk   <> 'C'          " <--- KHÁC C (Chưa xong)
+         INTO TABLE @lt_gm_ready.
+
+      IF sy-subrc = 0.
+        LOOP AT gt_tracking INTO gs_tracking.
+          DATA(lv_vbeln_ready) = |{ gs_tracking-sales_document ALPHA = IN }|.
+          READ TABLE lt_gm_ready WITH TABLE KEY table_line = lv_vbeln_ready TRANSPORTING NO FIELDS.
+          IF sy-subrc = 0.
+            APPEND gs_tracking TO lt_keep.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+      " =========================================================
+      " LOGIC GỘP: GI/GR POSTED
+      " =========================================================
+    WHEN 'POST'.
+      DATA: lt_gm_posted TYPE HASHED TABLE OF vbak-vbeln
+                         WITH UNIQUE KEY table_line.
+
+      " Logic: Tìm SO có Delivery (J hoặc T) mà trạng thái kho (WBSTK) là 'C' (Complete)
+      SELECT DISTINCT vbak~vbeln
+        FROM vbak
+        INNER JOIN vbfa ON vbfa~vbelv = vbak~vbeln
+        INNER JOIN likp ON likp~vbeln = vbfa~vbeln
+        WHERE ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+          AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+          AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+          AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+          AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+          AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+          AND vbfa~vbtyp_n IN ('J', 'T')   " J = Xuất hàng (GI), T = Trả hàng (GR)
+          AND likp~wbstk   = 'C'           " Trạng thái Completed (Đã Post)
+          INTO TABLE @lt_gm_posted.
+
+      IF sy-subrc = 0.
+        " Lọc lại bảng ALV dựa trên kết quả tìm được
+        LOOP AT gt_tracking INTO gs_tracking.
+          DATA(lv_vbeln_gm) = |{ gs_tracking-sales_document ALPHA = IN }|.
+          READ TABLE lt_gm_posted WITH TABLE KEY table_line = lv_vbeln_gm TRANSPORTING NO FIELDS.
+          IF sy-subrc = 0.
+            APPEND gs_tracking TO lt_keep.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+  ENDCASE.
+
+  " 3. Gán kết quả lọc vào bảng ALV
+  gt_tracking = lt_keep.
+ENDFORM.
+
+
+*&---------------------------------------------------------------------*
+*& Form FILTER_BILLING_STATUS
+*&---------------------------------------------------------------------*
+FORM filter_billing_status.
+
+  " 1. Nếu không lọc (chọn 'All') hoặc bảng ALV rỗng thì thoát
+  IF cb_bdsta IS INITIAL OR cb_bdsta = 'ALL' OR gt_tracking IS INITIAL.
+    EXIT.
+  ENDIF.
+
+  DATA: lt_keep TYPE STANDARD TABLE OF ty_tracking.
+  CLEAR lt_keep.
+
+  " 2. Biến hỗ trợ tìm kiếm DB (cho CANC và OPEN)
+  DATA: lv_vtweg_pattern TYPE string,
+        lv_spart_pattern TYPE string.
+
+  lv_vtweg_pattern = |%{ gv_vtweg }|.
+  lv_spart_pattern = |%{ gv_spart }|.
+
+  DATA: lt_canceled_so TYPE HASHED TABLE OF vbak-vbeln
+                       WITH UNIQUE KEY table_line.
+  DATA: lt_temp_so     TYPE STANDARD TABLE OF vbak-vbeln.
+
+  " =========================================================
+  " BƯỚC A: NẾU LỌC 'CANC' HOẶC 'OPEN' -> CẦN TÌM LIST ĐÃ HỦY TRƯỚC
+  " =========================================================
+  IF cb_bdsta = 'CANC' OR cb_bdsta = 'OPEN'.
+
+    CLEAR: lt_temp_so, lt_canceled_so.
+
+    " Path 1: Lấy SO -> Delivery -> Billing (Đã Hủy)
+    SELECT DISTINCT vbak~vbeln
+      FROM vbak
+      INNER JOIN vbfa AS vbfa_so  ON vbfa_so~vbelv  = vbak~vbeln
+      INNER JOIN vbfa AS vbfa_del ON vbfa_del~vbelv = vbfa_so~vbeln
+      INNER JOIN vbrk             ON vbrk~vbeln     = vbfa_del~vbeln
+      WHERE ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+        AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+        AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+        AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+        AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+        AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+        AND vbfa_so~vbtyp_n  = 'J'    " Delivery
+        AND vbfa_del~vbtyp_n = 'M'    " Billing
+        AND vbrk~fksto       = 'X'    " Đã Hủy
+      INTO TABLE @lt_temp_so.
+
+    " Path 2: Lấy SO -> Billing (Đã Hủy - cho ZDR/ZCRR)
+    SELECT DISTINCT vbak~vbeln
+      FROM vbak
+      INNER JOIN vbfa ON vbfa~vbelv = vbak~vbeln
+      INNER JOIN vbrk ON vbrk~vbeln = vbfa~vbeln
+      WHERE ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
+        AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
+        AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
+        AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
+        AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
+        AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
+        AND vbfa~vbtyp_n = 'M'        " Billing
+        AND vbrk~fksto   = 'X'        " Đã Hủy
+      APPENDING TABLE @lt_temp_so.
+
+    " Chuyển sang bảng Hashed để search nhanh
+    IF lt_temp_so IS NOT INITIAL.
+      SORT lt_temp_so.
+      DELETE ADJACENT DUPLICATES FROM lt_temp_so.
+      lt_canceled_so = lt_temp_so.
+    ENDIF.
+
+  ENDIF.
+
+  " =========================================================
+  " BƯỚC B: LỌC DỮ LIỆU CHÍNH
+  " =========================================================
+  LOOP AT gt_tracking INTO gs_tracking.
+
+    CASE cb_bdsta.
+
+        " --- 1. COMPLETED ---
+      WHEN 'COMP'.
+        " Logic: Đã có FI Document HOẶC (Là ZFOC và đã có Billing)
+        IF gs_tracking-fi_doc_billing IS NOT INITIAL.
+          APPEND gs_tracking TO lt_keep.
+        ELSEIF gs_tracking-order_type = 'ZFOC' AND gs_tracking-billing_document IS NOT INITIAL.
+          " [FIX]: ZFOC có Billing là tính Completed
+          APPEND gs_tracking TO lt_keep.
+        ENDIF.
+
+        " --- 2. CANCELLED ---
+      WHEN 'CANC'.
+        DATA(lv_vbeln_canc) = |{ gs_tracking-sales_document ALPHA = IN }|.
+        READ TABLE lt_canceled_so WITH TABLE KEY table_line = lv_vbeln_canc
+                                  TRANSPORTING NO FIELDS.
+        IF sy-subrc = 0.
+          APPEND gs_tracking TO lt_keep.
+        ENDIF.
+
+        " --- 3. OPEN: Billing created, no FI doc (CHỈ LẤY LỖI ĐỎ) ---
+      WHEN 'OPEN'.
+        DATA(lv_vbeln_open) = |{ gs_tracking-sales_document ALPHA = IN }|.
+
+        " A. Loại bỏ nếu nó nằm trong danh sách Hủy
+        READ TABLE lt_canceled_so WITH TABLE KEY table_line = lv_vbeln_open
+                                  TRANSPORTING NO FIELDS.
+        IF sy-subrc <> 0.
+
+          " B. Logic: Đã có Billing + Chưa có FI + KHÔNG PHẢI ZFOC
+          IF gs_tracking-billing_document IS NOT INITIAL
+             AND gs_tracking-fi_doc_billing IS INITIAL
+             AND gs_tracking-order_type <> 'ZFOC'. " <--- [FIX]: Loại bỏ ZFOC khỏi danh sách lỗi
+            APPEND gs_tracking TO lt_keep.
+          ENDIF.
+        ENDIF.
+
+    ENDCASE.
   ENDLOOP.
 
   " 3. Gán kết quả lọc vào bảng ALV
@@ -2749,539 +2396,119 @@ FORM filter_process_phase.
 
 ENDFORM.
 
-  FORM filter_tracking_data.
-
-    DATA: lt_keep TYPE STANDARD TABLE OF ty_tracking.
-
-    TYPES: BEGIN OF ty_vbeln,
-             vbeln TYPE vbak-vbeln,
-           END OF ty_vbeln.
-
-    DATA: lv_vtweg_pattern TYPE string,
-          lv_spart_pattern TYPE string.
-
-    IF cb_sosta IS INITIAL OR cb_sosta = 'ALL' OR gt_tracking IS INITIAL.
-      EXIT.
-    ENDIF.
-
-    CLEAR lt_keep.
-    lv_vtweg_pattern = |%{ gv_vtweg }|.
-    lv_spart_pattern = |%{ gv_spart }|.
-
-
-    CASE cb_sosta.
-
-      "--- INC (Giữ nguyên) ---
-      WHEN 'INC'.
-        DATA: lt_incomplete TYPE STANDARD TABLE OF vbak-vbeln.
-        SELECT vbak~vbeln
-          FROM vbak
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbak~netwr = 0
-         AND ( vbak~uvall = 'A' OR vbak~uvall = 'B' OR vbak~uvall = ' ' )
-          INTO TABLE @lt_incomplete.
-
-        IF sy-subrc = 0 AND lt_incomplete IS NOT INITIAL.
-          SORT lt_incomplete.
-          DELETE ADJACENT DUPLICATES FROM lt_incomplete.
-          LOOP AT gt_tracking INTO gs_tracking.
-            DATA(lv_vbeln_inc) = |{ gs_tracking-sales_document ALPHA = IN }|.
-            READ TABLE lt_incomplete
-                 WITH KEY table_line = lv_vbeln_inc
-                 BINARY SEARCH TRANSPORTING NO FIELDS.
-            IF sy-subrc = 0.
-              APPEND gs_tracking TO lt_keep.
-            ENDIF.
-          ENDLOOP.
-        ENDIF.
-
-      "--- COM (Giữ nguyên) ---
-      WHEN 'COM'.
-        DATA: lt_complete TYPE STANDARD TABLE OF vbak-vbeln.
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbap ON vbap~vbeln = vbak~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbak~uvall = 'C'
-          INTO TABLE @lt_complete.
-
-        IF sy-subrc = 0.
-          SORT lt_complete.
-          LOOP AT gt_tracking INTO gs_tracking.
-            DATA(lv_vbeln_cmp) = |{ gs_tracking-sales_document ALPHA = IN }|.
-            READ TABLE lt_complete WITH KEY table_line = lv_vbeln_cmp
-                       BINARY SEARCH TRANSPORTING NO FIELDS.
-            IF sy-subrc = 0.
-              APPEND gs_tracking TO lt_keep.
-            ENDIF.
-          ENDLOOP.
-        ENDIF.
-
-      "--- BLK (Giữ nguyên) ---
-      WHEN 'BLK'.
-        DATA: lt_billing_block TYPE STANDARD TABLE OF vbak-vbeln.
-        SELECT vbak~vbeln
-          FROM vbak
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbak~faksk IS NOT INITIAL
-          INTO TABLE @lt_billing_block.
-
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbap ON vbap~vbeln = vbak~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbap~faksp IS NOT INITIAL
-          APPENDING TABLE @lt_billing_block.
-
-        IF lt_billing_block IS NOT INITIAL.
-          SORT lt_billing_block.
-          DELETE ADJACENT DUPLICATES FROM lt_billing_block.
-          LOOP AT gt_tracking INTO gs_tracking.
-            DATA(lv_vbeln_blk) = |{ gs_tracking-sales_document ALPHA = IN }|.
-            READ TABLE lt_billing_block
-                 WITH KEY table_line = lv_vbeln_blk
-                 BINARY SEARCH TRANSPORTING NO FIELDS.
-            IF sy-subrc = 0.
-              APPEND gs_tracking TO lt_keep.
-            ENDIF.
-          ENDLOOP.
-        ENDIF.
-
-  "==================================================================
-      " SỬA LỖI S/4HANA: ABSTK CHỈ CÓ Ở HEADER (VBAK)
-      "==================================================================
-      WHEN 'REJ'.
-        DATA: lt_reject_so TYPE STANDARD TABLE OF vbak-vbeln.
-
-        " 1. Lấy SO bị reject ở Header (VBAK-ABSTK)
-        SELECT vbak~vbeln
-          FROM vbak
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbak~abstk IS NOT INITIAL " <== CHỈ KIỂM TRA VBAK
-          INTO TABLE @lt_reject_so.
-
-        " 2. So khớp với ALV
-        IF lt_reject_so IS NOT INITIAL.
-          SORT lt_reject_so.
-          DELETE ADJACENT DUPLICATES FROM lt_reject_so.
-          LOOP AT gt_tracking INTO gs_tracking.
-            DATA(lv_vbeln_rej) = |{ gs_tracking-sales_document ALPHA = IN }|.
-            READ TABLE lt_reject_so
-                 WITH KEY table_line = lv_vbeln_rej
-                 BINARY SEARCH TRANSPORTING NO FIELDS.
-            IF sy-subrc = 0.
-              APPEND gs_tracking TO lt_keep.
-            ENDIF.
-          ENDLOOP.
-        ENDIF.
-
-    ENDCASE.
-
-    " Gán kết quả lọc vào bảng ALV
-    gt_tracking = lt_keep.
-  ENDFORM.
-
-
-  FORM filter_delivery_status.
-
-    " 1. Nếu không lọc (chọn 'All') hoặc bảng ALV rỗng thì thoát
-    IF cb_ddsta IS INITIAL OR cb_ddsta = 'ALL' OR gt_tracking IS INITIAL.
-      EXIT.
-    ENDIF.
-
-    DATA: lt_keep TYPE STANDARD TABLE OF ty_tracking.
-    CLEAR lt_keep.
-
-    " 2. Lấy các biến pattern
-    DATA: lv_vtweg_pattern TYPE string,
-          lv_spart_pattern TYPE string.
-    lv_vtweg_pattern = |%{ gv_vtweg }|.
-    lv_spart_pattern = |%{ gv_spart }|.
-
-    CASE cb_ddsta.
-
-      "=========================================================
-      " LOGIC 'PGI' (S/4HANA)
-      "=========================================================
-      WHEN 'PGI'.
-        DATA: lt_gi_posted TYPE HASHED TABLE OF vbak-vbeln
-                           WITH UNIQUE KEY table_line.
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbfa ON vbfa~vbelv = vbak~vbeln
-          INNER JOIN likp ON likp~vbeln = vbfa~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbfa~vbtyp_n = 'J'
-         AND likp~wbstk   = 'C'
-         AND likp~vbtyp   = 'J'
-          INTO TABLE @DATA(lt_gi_posted_temp).
-
-        IF sy-subrc = 0.
-          lt_gi_posted = lt_gi_posted_temp.
-        ENDIF.
-
-        IF lt_gi_posted IS NOT INITIAL.
-          LOOP AT gt_tracking INTO gs_tracking.
-            DATA(lv_vbeln_gi) = |{ gs_tracking-sales_document ALPHA = IN }|.
-            READ TABLE lt_gi_posted WITH TABLE KEY table_line = lv_vbeln_gi TRANSPORTING NO FIELDS.
-            IF sy-subrc = 0.
-              APPEND gs_tracking TO lt_keep.
-            ENDIF.
-          ENDLOOP.
-        ENDIF.
-
-      "=========================================================
-      " LOGIC 'GRP' (S/4HANA)
-      "=========================================================
-      WHEN 'GRP'.
-        DATA: lt_gr_posted TYPE HASHED TABLE OF vbak-vbeln
-                           WITH UNIQUE KEY table_line.
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbfa ON vbfa~vbelv = vbak~vbeln
-          INNER JOIN likp ON likp~vbeln = vbfa~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbfa~vbtyp_n = 'T' " Link là 1 Returns Delivery
-         AND likp~wbstk   = 'C' " Đã GR (Completed)
-         AND likp~vbtyp   = 'T' " Là 1 Returns Delivery
-          INTO TABLE @DATA(lt_gr_posted_temp_grp).
-
-        IF sy-subrc = 0.
-          lt_gr_posted = lt_gr_posted_temp_grp.
-        ENDIF.
-
-        IF lt_gr_posted IS NOT INITIAL.
-          LOOP AT gt_tracking INTO gs_tracking.
-            DATA(lv_vbeln_gr) = |{ gs_tracking-sales_document ALPHA = IN }|.
-            READ TABLE lt_gr_posted WITH TABLE KEY table_line = lv_vbeln_gr TRANSPORTING NO FIELDS.
-            IF sy-subrc = 0.
-              APPEND gs_tracking TO lt_keep.
-            ENDIF.
-          ENDLOOP.
-        ENDIF.
-
-    ENDCASE. " <== SỬA LỖI CÚ PHÁP: THÊM DÒNG NÀY
-
-    " 3. Gán kết quả lọc (lt_keep) vào bảng ALV (gt_tracking)
-    gt_tracking = lt_keep.
-
-  ENDFORM.
-
-  FORM filter_billing_status.
-
-    " 1. Nếu không lọc (chọn 'All') hoặc bảng ALV rỗng thì thoát
-    IF cb_bdsta IS INITIAL OR cb_bdsta = 'ALL' OR gt_tracking IS INITIAL.
-      EXIT.
-    ENDIF.
-
-    DATA: lt_keep TYPE STANDARD TABLE OF ty_tracking.
-    CLEAR lt_keep.
-
-    " 2. Lấy các biến pattern
-    DATA: lv_vtweg_pattern TYPE string,
-          lv_spart_pattern TYPE string.
-    lv_vtweg_pattern = |%{ gv_vtweg }|.
-    lv_spart_pattern = |%{ gv_spart }|.
-
-    " Bảng tạm
-    DATA: lt_billing_so TYPE HASHED TABLE OF vbak-vbeln
-                        WITH UNIQUE KEY table_line.
-    DATA: lt_temp_so    TYPE STANDARD TABLE OF vbak-vbeln.
-
-
-    CASE cb_bdsta.
-
-      "=========================================================
-      " LOGIC 'COMPLETED'
-      "=========================================================
-      WHEN 'COMP'.
-        LOOP AT gt_tracking INTO gs_tracking
-            WHERE process_phase = 'Accounting'.
-          APPEND gs_tracking TO lt_keep.
-        ENDLOOP.
-
-      "=========================================================
-      " LOGIC 'CANCELLED'
-      "=========================================================
-      WHEN 'CANC'.
-        " Path 1: Lấy SO -> Delivery -> Billing (Đã Hủy)
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbfa AS vbfa_so ON vbfa_so~vbelv = vbak~vbeln
-          INNER JOIN vbfa AS vbfa_del ON vbfa_del~vbelv = vbfa_so~vbeln
-          INNER JOIN vbrk ON vbrk~vbeln = vbfa_del~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbfa_so~vbtyp_n  = 'J'
-         AND vbfa_del~vbtyp_n = 'M'
-         AND vbrk~fksto       = 'X'
-        INTO TABLE @lt_temp_so.
-
-        " Path 2: Lấy SO -> Billing (Đã Hủy)
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbfa ON vbfa~vbelv = vbak~vbeln
-          INNER JOIN vbrk ON vbrk~vbeln = vbfa~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbfa~vbtyp_n = 'M'
-         AND vbrk~fksto   = 'X'
-        APPENDING TABLE @lt_temp_so.
-
-        "--- So khớp logic 'CANC' ---
-        IF lt_temp_so IS NOT INITIAL.
-          SORT lt_temp_so.
-          DELETE ADJACENT DUPLICATES FROM lt_temp_so.
-          lt_billing_so = lt_temp_so.
-
-          LOOP AT gt_tracking INTO gs_tracking.
-            DATA(lv_vbeln_bil) = |{ gs_tracking-sales_document ALPHA = IN }|.
-            READ TABLE lt_billing_so WITH TABLE KEY table_line = lv_vbeln_bil TRANSPORTING NO FIELDS.
-            IF sy-subrc = 0.
-              APPEND gs_tracking TO lt_keep.
-            ENDIF.
-          ENDLOOP.
-        ENDIF.
-
-      "=========================================================
-      " LOGIC 'OPEN'
-      "=========================================================
-      WHEN 'OPEN'.
-        " 1. Lấy danh sách 'Cancelled' (giống hệt 'WHEN CANC')
-        " Path 1:
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbfa AS vbfa_so ON vbfa_so~vbelv = vbak~vbeln
-          INNER JOIN vbfa AS vbfa_del ON vbfa_del~vbelv = vbfa_so~vbeln
-          INNER JOIN vbrk ON vbrk~vbeln = vbfa_del~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbfa_so~vbtyp_n  = 'J'
-         AND vbfa_del~vbtyp_n = 'M'
-         AND vbrk~fksto       = 'X'
-        INTO TABLE @lt_temp_so.
-
-        " Path 2:
-        SELECT DISTINCT vbak~vbeln
-          FROM vbak
-          INNER JOIN vbfa ON vbfa~vbelv = vbak~vbeln
-          INNER JOIN vbrk ON vbrk~vbeln = vbfa~vbeln
-          WHERE
-             ( @gv_kunnr IS INITIAL OR vbak~kunnr = @gv_kunnr )
-         AND ( @gv_vkorg IS INITIAL OR vbak~vkorg = @gv_vkorg )
-         AND ( @gv_vtweg IS INITIAL OR vbak~vtweg LIKE @lv_vtweg_pattern )
-         AND ( @gv_spart IS INITIAL OR vbak~spart LIKE @lv_spart_pattern )
-         AND ( @gv_doc_date IS INITIAL OR vbak~erdat = @gv_doc_date )
-         AND ( @gv_ernam IS INITIAL OR vbak~ernam = @gv_ernam )
-         AND vbfa~vbtyp_n = 'M'
-         AND vbrk~fksto   = 'X'
-        APPENDING TABLE @lt_temp_so.
-
-        " 2. Chuyển danh sách 'Cancelled' sang Hashed Table
-        IF lt_temp_so IS NOT INITIAL.
-          SORT lt_temp_so.
-          DELETE ADJACENT DUPLICATES FROM lt_temp_so.
-          lt_billing_so = lt_temp_so. " (lt_billing_so giờ là bảng Hủy)
-        ENDIF.
-
-        " 3. Lọc ALV
-        LOOP AT gt_tracking INTO gs_tracking
-            WHERE process_phase = 'Invoice processing'.
-
-          " Kiểm tra xem nó có nằm trong bảng Hủy không
-          DATA(lv_vbeln_open) = |{ gs_tracking-sales_document ALPHA = IN }|.
-          READ TABLE lt_billing_so WITH TABLE KEY table_line = lv_vbeln_open
-                     TRANSPORTING NO FIELDS.
-
-          IF sy-subrc <> 0.
-            " KHÔNG tìm thấy trong bảng Hủy (sy-subrc = 4)
-            " => Nó là 'Open'
-            APPEND gs_tracking TO lt_keep.
-          ENDIF.
-        ENDLOOP.
-
-    ENDCASE.
-
-    " Gán kết quả (dù rỗng hay có) vào bảng ALV
-    gt_tracking = lt_keep.
-
-  ENDFORM.
-
-  FORM filter_pricing_procedure.
-
-    "=========================================================
-    " SỬA LỖI GỐC RỄ:
-    " Nếu user đang lọc 'Incomplete', KHÔNG được lọc pricing.
-    " (Vì SO Incomplete sẽ không có pricing và sẽ bị xóa)
-    "=========================================================
-    IF cb_sosta = 'INC'.
-      EXIT. " Thoát khỏi FORM này, không làm gì cả
-    ENDIF.
-
-    " Nếu không có data thì thoát (cho các bộ lọc khác)
-    CHECK gt_tracking IS NOT INITIAL.
-
-    DATA: lt_filtered TYPE STANDARD TABLE OF ty_tracking.
-
-    " 1. Lấy dữ liệu TVAK (Document Pricing)
-    TYPES: BEGIN OF ty_tvak,
-             auart TYPE tvak-auart,
-             kalvg TYPE tvak-kalvg,
-           END OF ty_tvak.
-    DATA: lt_tvak TYPE HASHED TABLE OF ty_tvak WITH UNIQUE KEY auart.
-    SELECT auart, kalvg
-      FROM tvak
-      FOR ALL ENTRIES IN @gt_tracking
-      WHERE auart = @gt_tracking-order_type
-      INTO TABLE @lt_tvak.
-
-    " 2. Lấy dữ liệu KNVV (Customer Pricing)
-    TYPES: BEGIN OF ty_knvv,
-             kunnr TYPE knvv-kunnr,
-             vkorg TYPE knvv-vkorg,
-             vtweg TYPE knvv-vtweg,
-             spart TYPE knvv-spart,
-             kalks TYPE knvv-kalks,
-           END OF ty_knvv.
-    DATA: lt_knvv TYPE HASHED TABLE OF ty_knvv
-      WITH UNIQUE KEY kunnr vkorg vtweg spart.
-    SELECT kunnr, vkorg, vtweg, spart, kalks
-      FROM knvv
-      FOR ALL ENTRIES IN @gt_tracking
-      WHERE kunnr = @gt_tracking-sold_to_party
-        AND vkorg = @gt_tracking-sales_org
-        AND vtweg = @gt_tracking-distr_chan
-        AND spart = @gt_tracking-division
-      INTO TABLE @lt_knvv.
-
-    " 3. Lấy dữ liệu T683V (Pricing Procedure Determination)
-    TYPES: BEGIN OF ty_t683v,
-             vkorg TYPE t683v-vkorg,
-             vtweg TYPE t683v-vtweg,
-             spart TYPE t683v-spart,
-             kalvg TYPE t683v-kalvg,
-             kalks TYPE t683v-kalks,
-             kalsm TYPE t683v-kalsm,
-           END OF ty_t683v.
-    DATA: lt_t683v TYPE HASHED TABLE OF ty_t683v
-      WITH UNIQUE KEY vkorg vtweg spart kalvg kalks.
-
-    IF lt_knvv IS NOT INITIAL AND lt_tvak IS NOT INITIAL.
-      DATA: lt_kalvg TYPE RANGE OF t683v-kalvg.
-      LOOP AT lt_tvak INTO DATA(ls_tvak_filter).
-        APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_tvak_filter-kalvg ) TO lt_kalvg.
-      ENDLOOP.
-      SORT lt_kalvg.
-      DELETE ADJACENT DUPLICATES FROM lt_kalvg.
-
-      IF lt_kalvg IS NOT INITIAL.
-        SELECT vkorg, vtweg, spart, kalvg, kalks, kalsm
-          FROM t683v
-          FOR ALL ENTRIES IN @lt_knvv
-          WHERE vkorg = @lt_knvv-vkorg
-            AND vtweg = @lt_knvv-vtweg
-            AND spart = @lt_knvv-spart
-            AND kalks = @lt_knvv-kalks
-            AND kalvg IN @lt_kalvg
-          INTO TABLE @lt_t683v.
-      ENDIF.
-    ENDIF.
-
-    " 4. LOOP tại bộ nhớ (rất nhanh)
-    LOOP AT gt_tracking INTO gs_tracking.
-      READ TABLE lt_tvak WITH TABLE KEY auart = gs_tracking-order_type
-        INTO DATA(ls_tvak).
-      IF sy-subrc <> 0. CONTINUE. ENDIF.
-
-      READ TABLE lt_knvv WITH TABLE KEY
-        kunnr = gs_tracking-sold_to_party
-        vkorg = gs_tracking-sales_org
-        vtweg = gs_tracking-distr_chan
-        spart = gs_tracking-division
-        INTO DATA(ls_knvv).
-      IF sy-subrc <> 0. CONTINUE. ENDIF.
-
-      READ TABLE lt_t683v WITH TABLE KEY
-        vkorg = gs_tracking-sales_org
-        vtweg = gs_tracking-distr_chan
-        spart = gs_tracking-division
-        kalvg = ls_tvak-kalvg
-        kalks = ls_knvv-kalks
-        TRANSPORTING NO FIELDS.
-
-      IF sy-subrc = 0.
-        APPEND gs_tracking TO lt_filtered.
-      ENDIF.
+FORM filter_pricing_procedure.
+
+  "=========================================================
+  " Nếu user đang lọc 'Incomplete', KHÔNG được lọc pricing.
+  " (Vì SO Incomplete sẽ không có pricing và sẽ bị xóa)
+  "=========================================================
+  IF cb_sosta = 'INC'.
+    EXIT. " Thoát khỏi FORM này, không làm gì cả
+  ENDIF.
+
+  " Nếu không có data thì thoát (cho các bộ lọc khác)
+  CHECK gt_tracking IS NOT INITIAL.
+
+  DATA: lt_filtered TYPE STANDARD TABLE OF ty_tracking.
+
+  " 1. Lấy dữ liệu TVAK (Document Pricing)
+  TYPES: BEGIN OF ty_tvak,
+           auart TYPE tvak-auart,
+           kalvg TYPE tvak-kalvg,
+         END OF ty_tvak.
+  DATA: lt_tvak TYPE HASHED TABLE OF ty_tvak WITH UNIQUE KEY auart.
+  SELECT auart, kalvg
+    FROM tvak
+    FOR ALL ENTRIES IN @gt_tracking
+    WHERE auart = @gt_tracking-order_type
+    INTO TABLE @lt_tvak.
+
+  " 2. Lấy dữ liệu KNVV (Customer Pricing)
+  TYPES: BEGIN OF ty_knvv,
+           kunnr TYPE knvv-kunnr,
+           vkorg TYPE knvv-vkorg,
+           vtweg TYPE knvv-vtweg,
+           spart TYPE knvv-spart,
+           kalks TYPE knvv-kalks,
+         END OF ty_knvv.
+  DATA: lt_knvv TYPE HASHED TABLE OF ty_knvv
+    WITH UNIQUE KEY kunnr vkorg vtweg spart.
+  SELECT kunnr, vkorg, vtweg, spart, kalks
+    FROM knvv
+    FOR ALL ENTRIES IN @gt_tracking
+    WHERE kunnr = @gt_tracking-sold_to_party
+      AND vkorg = @gt_tracking-sales_org
+      AND vtweg = @gt_tracking-distr_chan
+      AND spart = @gt_tracking-division
+    INTO TABLE @lt_knvv.
+
+  " 3. Lấy dữ liệu T683V (Pricing Procedure Determination)
+  TYPES: BEGIN OF ty_t683v,
+           vkorg TYPE t683v-vkorg,
+           vtweg TYPE t683v-vtweg,
+           spart TYPE t683v-spart,
+           kalvg TYPE t683v-kalvg,
+           kalks TYPE t683v-kalks,
+           kalsm TYPE t683v-kalsm,
+         END OF ty_t683v.
+  DATA: lt_t683v TYPE HASHED TABLE OF ty_t683v
+    WITH UNIQUE KEY vkorg vtweg spart kalvg kalks.
+
+  IF lt_knvv IS NOT INITIAL AND lt_tvak IS NOT INITIAL.
+    DATA: lt_kalvg TYPE RANGE OF t683v-kalvg.
+    LOOP AT lt_tvak INTO DATA(ls_tvak_filter).
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_tvak_filter-kalvg ) TO lt_kalvg.
     ENDLOOP.
-    gt_tracking = lt_filtered.
-  ENDFORM.
+    SORT lt_kalvg.
+    DELETE ADJACENT DUPLICATES FROM lt_kalvg.
+
+    IF lt_kalvg IS NOT INITIAL.
+      SELECT vkorg, vtweg, spart, kalvg, kalks, kalsm
+        FROM t683v
+        FOR ALL ENTRIES IN @lt_knvv
+        WHERE vkorg = @lt_knvv-vkorg
+          AND vtweg = @lt_knvv-vtweg
+          AND spart = @lt_knvv-spart
+          AND kalks = @lt_knvv-kalks
+          AND kalvg IN @lt_kalvg
+        INTO TABLE @lt_t683v.
+    ENDIF.
+  ENDIF.
+
+  " 4. LOOP tại bộ nhớ (rất nhanh)
+  LOOP AT gt_tracking INTO gs_tracking.
+    READ TABLE lt_tvak WITH TABLE KEY auart = gs_tracking-order_type
+      INTO DATA(ls_tvak).
+    IF sy-subrc <> 0. CONTINUE. ENDIF.
+
+    READ TABLE lt_knvv WITH TABLE KEY
+      kunnr = gs_tracking-sold_to_party
+      vkorg = gs_tracking-sales_org
+      vtweg = gs_tracking-distr_chan
+      spart = gs_tracking-division
+      INTO DATA(ls_knvv).
+    IF sy-subrc <> 0. CONTINUE. ENDIF.
+
+    READ TABLE lt_t683v WITH TABLE KEY
+      vkorg = gs_tracking-sales_org
+      vtweg = gs_tracking-distr_chan
+      spart = gs_tracking-division
+      kalvg = ls_tvak-kalvg
+      kalks = ls_knvv-kalks
+      TRANSPORTING NO FIELDS.
+
+    IF sy-subrc = 0.
+      APPEND gs_tracking TO lt_filtered.
+    ENDIF.
+  ENDLOOP.
+  gt_tracking = lt_filtered.
+ENDFORM.
 *  ---------------------------------------------------------------------*
 *    Chuẩn hóa input
 *  ---------------------------------------------------------------------*
 FORM normalize_search_inputs.
 
-  " =========================================================
-  " === LOGIC MỚI: Tách Sales Area gộp ra 3 biến cũ ===
-  " =========================================================
   IF gv_sarea IS NOT INITIAL.
-    " 1. Xóa các ký tự phân cách nếu user nhập (ví dụ 1000/10/00 -> 1000 10 00)
     REPLACE ALL OCCURRENCES OF '/' IN gv_sarea WITH space.
     REPLACE ALL OCCURRENCES OF '-' IN gv_sarea WITH space.
 
@@ -3291,32 +2518,109 @@ FORM normalize_search_inputs.
     " 3. Xóa khoảng trắng thừa
     CONDENSE: gv_vkorg, gv_vtweg, gv_spart.
   ENDIF.
+
+  " =========================================================
+  " 2. XÓA SỐ 0 ĐẰNG TRƯỚC (SHIFT LEFT DELETING LEADING '0')
   " =========================================================
 
+  " --- A. Sold-to Party ---
+  IF gv_kunnr IS NOT INITIAL.
+    SHIFT gv_kunnr LEFT DELETING LEADING '0'.
+  ENDIF.
+
+  " --- B. Sales Document ---
+  IF gv_vbeln IS NOT INITIAL.
+    SHIFT gv_vbeln LEFT DELETING LEADING '0'.
+  ENDIF.
+
+  " --- C. Delivery Document ---
+  IF gv_deliv IS NOT INITIAL.
+    SHIFT gv_deliv LEFT DELETING LEADING '0'.
+  ENDIF.
+
+  " --- D. Billing Document ---
+  IF gv_bill IS NOT INITIAL.
+    SHIFT gv_bill LEFT DELETING LEADING '0'.
+  ENDIF.
   "👉 Chuẩn hóa Sold-to Party (Giữ nguyên code cũ)
   IF gv_kunnr IS NOT INITIAL.
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input = gv_kunnr
-      IMPORTING output = gv_kunnr.
+      EXPORTING
+        input  = gv_kunnr
+      IMPORTING
+        output = gv_kunnr.
   ENDIF.
 
   "👉 Chuẩn hóa Sales Doc (Giữ nguyên code cũ)
   IF gv_vbeln IS NOT INITIAL.
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input = gv_vbeln
-      IMPORTING output = gv_vbeln.
+      EXPORTING
+        input  = gv_vbeln
+      IMPORTING
+        output = gv_vbeln.
   ENDIF.
 
   " 👉 3. [THÊM MỚI] Chuẩn hóa Delivery Doc
   IF gv_deliv IS NOT INITIAL.
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input = gv_deliv IMPORTING output = gv_deliv.
+      EXPORTING
+        input  = gv_deliv
+      IMPORTING
+        output = gv_deliv.
   ENDIF.
 
   " 👉 4. [THÊM MỚI] Chuẩn hóa Billing Doc
   IF gv_bill IS NOT INITIAL.
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input = gv_bill IMPORTING output = gv_bill.
+      EXPORTING
+        input  = gv_bill
+      IMPORTING
+        output = gv_bill.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Form DENORMALIZE_SEARCH_INPUTS
+*&---------------------------------------------------------------------*
+*& Xóa số 0 ở đầu để hiển thị lên màn hình cho đẹp (User Friendly)
+*&---------------------------------------------------------------------*
+FORM denormalize_search_inputs.
+
+  " 1. Sales Document
+  IF gv_vbeln IS NOT INITIAL.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = gv_vbeln
+      IMPORTING
+        output = gv_vbeln.
+  ENDIF.
+
+  " 2. Delivery Document
+  IF gv_deliv IS NOT INITIAL.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = gv_deliv
+      IMPORTING
+        output = gv_deliv.
+  ENDIF.
+
+  " 3. Billing Document
+  IF gv_bill IS NOT INITIAL.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = gv_bill
+      IMPORTING
+        output = gv_bill.
+  ENDIF.
+
+  " 4. Sold-to Party (Nếu muốn xóa cả số 0 của khách hàng)
+  IF gv_kunnr IS NOT INITIAL.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+      EXPORTING
+        input  = gv_kunnr
+      IMPORTING
+        output = gv_kunnr.
   ENDIF.
 
 ENDFORM.
@@ -3325,178 +2629,144 @@ ENDFORM.
 *  ---------------------------------------------------------------------*
 *    Lọc dữ liệu theo input search
 *  ---------------------------------------------------------------------*
-  FORM filter_by_search.
+FORM filter_by_search.
 
-    DATA lt_filtered TYPE STANDARD TABLE OF ty_tracking.
+  DATA lt_filtered TYPE STANDARD TABLE OF ty_tracking.
 
-    PERFORM normalize_search_inputs.
+  PERFORM normalize_search_inputs.
 
-    LOOP AT gt_tracking INTO gs_tracking.
+  LOOP AT gt_tracking INTO gs_tracking.
 
-      "1️.Document Date (chỉ 1 field)
-      IF gv_doc_date IS NOT INITIAL AND gs_tracking-document_date <> gv_doc_date.
-        CONTINUE.
-      ENDIF.
+    "1️.Document Date (chỉ 1 field)
+    IF gv_doc_date IS NOT INITIAL AND gs_tracking-document_date <> gv_doc_date.
+      CONTINUE.
+    ENDIF.
 
-      "2️.Sold-to Party
-      IF gv_kunnr IS NOT INITIAL AND gs_tracking-sold_to_party <> gv_kunnr.
-        CONTINUE.
-      ENDIF.
+    "2️.Sold-to Party
+    IF gv_kunnr IS NOT INITIAL AND gs_tracking-sold_to_party <> gv_kunnr.
+      CONTINUE.
+    ENDIF.
 
-      "3️.Created By
-      IF gv_ernam IS NOT INITIAL AND gs_tracking-created_by <> gv_ernam.
-        CONTINUE.
-      ENDIF.
+    "3️.Created By
+    IF gv_ernam IS NOT INITIAL AND gs_tracking-created_by <> gv_ernam.
+      CONTINUE.
+    ENDIF.
 
-      "4️.Sales Org / Distr. Channel / Division
-      IF gv_vkorg IS NOT INITIAL AND gs_tracking-sales_org  <> gv_vkorg.  CONTINUE. ENDIF.
-      IF gv_vtweg IS NOT INITIAL AND gs_tracking-distr_chan <> gv_vtweg.  CONTINUE. ENDIF.
-      IF gv_spart IS NOT INITIAL AND gs_tracking-division  <> gv_spart.   CONTINUE. ENDIF.
+    "4️.Sales Org / Distr. Channel / Division
+    IF gv_vkorg IS NOT INITIAL AND gs_tracking-sales_org  <> gv_vkorg.  CONTINUE. ENDIF.
+    IF gv_vtweg IS NOT INITIAL AND gs_tracking-distr_chan <> gv_vtweg.  CONTINUE. ENDIF.
+    IF gv_spart IS NOT INITIAL AND gs_tracking-division  <> gv_spart.   CONTINUE. ENDIF.
 
-      "👉 Nếu qua hết điều kiện => giữ lại
-      APPEND gs_tracking TO lt_filtered.
+    "👉 Nếu qua hết điều kiện => giữ lại
+    APPEND gs_tracking TO lt_filtered.
 
-    ENDLOOP.
+  ENDLOOP.
 
-    gt_tracking = lt_filtered.
-    CALL METHOD go_alv->refresh_table_display( ).
+  gt_tracking = lt_filtered.
+  CALL METHOD go_alv->refresh_table_display( ).
 
-  ENDFORM.
+ENDFORM.
 
 
 *&---------------------------------------------------------------------*
 *& Form PROCESS_POST_GOODS_ISSUE
-*& Sửa lỗi cú pháp: Cấu trúc PROTT dùng MSGID và MSGNO
-*& Sửa lỗi đồng bộ: Dùng SET UPDATE TASK LOCAL
 *&---------------------------------------------------------------------*
 FORM process_post_goods_issue
-  USING
-    is_tracking_line TYPE ty_tracking
-  CHANGING
-    cs_tracking_line TYPE ty_tracking.
+  USING    is_tracking_line TYPE ty_tracking
+  CHANGING cs_tracking_line TYPE ty_tracking.
 
-  " --- 1. Khai báo biến ---
-  DATA: ls_vbkok      TYPE vbkok,
-        lt_vbpok      TYPE TABLE OF vbpok,
-        ls_vbpok      TYPE vbpok,
-        lt_prot       TYPE TABLE OF prott,
-        ls_prot       TYPE prott,
-        lv_vbeln      TYPE likp-vbeln,
-        lt_lips       TYPE TABLE OF lipsvb,
-        lv_vbeln_char(10) TYPE c.
+  " --- Data Declaration ---
+  DATA: ls_vbkok        TYPE vbkok,
+        lt_vbpok        TYPE TABLE OF vbpok,
+        ls_vbpok        TYPE vbpok,
+        lt_prot         TYPE TABLE OF prott,
+        ls_prot         TYPE prott,
+        lv_vbeln        TYPE likp-vbeln,
+        lt_lips         TYPE TABLE OF lipsvb,
+        lv_full_message TYPE string.
 
-  DATA: lv_full_message TYPE string.
-  DATA: lv_subrc_char(4) TYPE c.
-  DATA: lv_fm_subrc     TYPE sy-subrc.
-
-  " 1. Lấy số delivery
+  " 1. Validation
   lv_vbeln = is_tracking_line-delivery_document.
   CLEAR cs_tracking_line-error_msg.
 
   IF lv_vbeln IS INITIAL.
-    cs_tracking_line-error_msg = 'ERROR: Dòng này không có Delivery Document.'.
+    cs_tracking_line-error_msg = 'ERROR: No Delivery Document found.'.
     EXIT.
   ENDIF.
 
-  " 2. CHUẨN BỊ DỮ LIỆU
-  " 2a. Lấy tất cả item của Delivery
-  SELECT *
-    FROM lips
-    INTO TABLE @lt_lips
-    WHERE vbeln = @lv_vbeln.
-  IF sy-subrc <> 0 OR lt_lips IS INITIAL.
-    cs_tracking_line-error_msg = 'LỖI: Không tìm thấy item (LIPS) cho Delivery.'.
+  " 2. Prepare Data
+  " 2a. Get items
+  SELECT * FROM lips INTO TABLE @lt_lips WHERE vbeln = @lv_vbeln.
+  IF sy-subrc <> 0.
+    cs_tracking_line-error_msg = 'ERROR: Delivery items (LIPS) not found.'.
     EXIT.
   ENDIF.
 
-  " 2b. Chuẩn bị Header (VBKOK)
-  ls_vbkok-vbeln_vl   = lv_vbeln.
-  ls_vbkok-wabuc      = 'X'.
-  ls_vbkok-wadat_ist  = sy-datum.
+  " 2b. Header
+  ls_vbkok-vbeln_vl  = lv_vbeln.
+  ls_vbkok-wabuc     = 'X'.        " Post Goods Issue
+  ls_vbkok-wadat_ist = sy-datum.   " Actual GI Date
 
-  " 2c. Chuẩn bị Items (VBPOK)
-  CLEAR lt_vbpok.
+  " 2c. Items
   LOOP AT lt_lips ASSIGNING FIELD-SYMBOL(<fs_lips>).
     CLEAR ls_vbpok.
     ls_vbpok-vbeln_vl = <fs_lips>-vbeln.
     ls_vbpok-posnr_vl = <fs_lips>-posnr.
-    ls_vbpok-lfimg    = <fs_lips>-lfimg.
-    ls_vbpok-lgmng    = <fs_lips>-lgmng.
+    ls_vbpok-lfimg    = <fs_lips>-lfimg. " Quantity
+    ls_vbpok-lgmng    = <fs_lips>-lgmng. " Quantity Base
     APPEND ls_vbpok TO lt_vbpok.
   ENDLOOP.
 
-  "=========================================================
-  "=== 3. (SỬA LỖI ĐỒNG BỘ) Ép FM chạy Đồng bộ
-  "=========================================================
-  SET UPDATE TASK LOCAL.
-  "=========================================================
-
-  " 4. GỌI FM CHUẨN 'WS_DELIVERY_UPDATE_2'
+  " 3. Call FM
+  " Lưu ý: Không dùng SET UPDATE TASK LOCAL để tránh lỗi bộ nhớ khi chạy Mass
   CALL FUNCTION 'WS_DELIVERY_UPDATE_2'
     EXPORTING
-      vbkok_wa      = ls_vbkok
-      synchron      = 'X'
-      commit        = ' '
-      delivery      = lv_vbeln
+      vbkok_wa  = ls_vbkok
+      synchron  = 'X'     " Synchronous update (Quan trọng cho Mass)
+      commit    = ' '     " Không commit trong FM
+      delivery  = lv_vbeln
     TABLES
-      vbpok_tab     = lt_vbpok
-      prot          = lt_prot
+      vbpok_tab = lt_vbpok
+      prot      = lt_prot
     EXCEPTIONS
-      error_message = 1
-      OTHERS        = 2.
+      OTHERS    = 1.
 
-  lv_fm_subrc = sy-subrc.
-
-  " 5. KIỂM TRA BẢNG LỖI (PROT) TRƯỚC
-  READ TABLE lt_prot INTO ls_prot WITH KEY msgty = 'A'.
+  " 4. Analyze Result
   IF sy-subrc <> 0.
-    READ TABLE lt_prot INTO ls_prot WITH KEY msgty = 'E'.
+    " Technical Error
+    cs_tracking_line-error_msg = 'ERROR: WS_DELIVERY_UPDATE_2 failed (Exception).'.
+    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+    EXIT.
   ENDIF.
 
-  IF sy-subrc = 0 OR lv_fm_subrc <> 0.
-    " LỖI (Hoặc tìm thấy lỗi 'A'/'E' TRONG BẢNG PROT,
-    "      hoặc FM bị DUMP (sy-subrc <> 0))
+  " Check Business Error in PROT table (Quan trọng!)
+  READ TABLE lt_prot INTO ls_prot WITH KEY msgty = 'E'.
+  IF sy-subrc <> 0.
+    READ TABLE lt_prot INTO ls_prot WITH KEY msgty = 'A'.
+  ENDIF.
+
+  IF sy-subrc = 0.
+    " --- FAILURE ---
     CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
 
-    IF sy-subrc = 0.
-      " Lỗi do nghiệp vụ (đã tìm thấy 'A'/'E' trong PROT)
-      "=========================================================
-      "=== SỬA LỖI CÚ PHÁP: Dùng MSGID và MSGNO cho PROTT
-      "=========================================================
-      MESSAGE ID ls_prot-msgid TYPE 'S' NUMBER ls_prot-msgno
-         WITH ls_prot-msgv1 ls_prot-msgv2 ls_prot-msgv3 ls_prot-msgv4
-         INTO lv_full_message.
+    MESSAGE ID ls_prot-msgid TYPE 'S' NUMBER ls_prot-msgno
+            WITH ls_prot-msgv1 ls_prot-msgv2 ls_prot-msgv3 ls_prot-msgv4
+            INTO lv_full_message.
 
-      CONCATENATE 'LỖI (' ls_prot-msgid ' ' ls_prot-msgno '): ' lv_full_message
-             INTO cs_tracking_line-error_msg SEPARATED BY space.
-      "=========================================================
-    ELSE.
-      " Lỗi do FM DUMP (ví dụ, sy-subrc = 1 hoặc 2)
-      WRITE lv_fm_subrc TO lv_subrc_char.
-      CONDENSE lv_subrc_char.
-      CONCATENATE 'LỖI: Post PGI thất bại (sy-subrc = ' lv_subrc_char ').'
-             INTO cs_tracking_line-error_msg SEPARATED BY space.
-    ENDIF.
+    cs_tracking_line-error_msg = |ERROR: { lv_full_message }|.
   ELSE.
-    " THÀNH CÔNG (Không có lỗi 'A'/'E' VÀ sy-subrc = 0)
-    "=========================================================
-    "=== (SỬA LỖI ĐỒNG BỘ) Dùng COMMIT WORK AND WAIT
-    "=========================================================
-    COMMIT WORK AND WAIT.
-    "=========================================================
+    " --- SUCCESS ---
+    " Commit & Wait để đảm bảo DB update xong trước khi trả về UI
+    CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+      EXPORTING
+        wait = 'X'.
 
-    WRITE lv_vbeln TO lv_vbeln_char.
-    CONDENSE lv_vbeln_char.
-    CONCATENATE 'PGI cho Delivery ' lv_vbeln_char ' thành công.'
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
+    cs_tracking_line-error_msg = |Success: PGI Posted for { lv_vbeln }.|.
   ENDIF.
 
 ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form PROCESS_CREATE_BILLING
-*& Sửa lỗi: 1. Dùng SET UPDATE TASK LOCAL để chạy đồng bộ.
-*&         2. Sửa logic: Đọc message 'A'/'E' từ BAPIRET2.
-*&         3. Sửa lỗi cú pháp: Dùng CONCATENATE.
 *&---------------------------------------------------------------------*
 FORM process_create_billing
   USING
@@ -3504,6 +2774,7 @@ FORM process_create_billing
   CHANGING
     cs_tracking_line TYPE ty_tracking.
 
+  " --- Data Declaration ---
   DATA: lt_billingdata TYPE TABLE OF bapivbrk,
         ls_billingdata TYPE bapivbrk,
         lt_return      TYPE TABLE OF bapiret2,
@@ -3511,83 +2782,214 @@ FORM process_create_billing
         lt_success     TYPE TABLE OF bapivbrksuccess,
         ls_success     TYPE bapivbrksuccess,
         lv_billdoc     TYPE vbrk-vbeln.
-  DATA: lv_vbeln_alpha TYPE vbeln_vl.
-  DATA: lt_lips TYPE STANDARD TABLE OF lips.
 
-  " 1. Lấy số delivery
+  DATA: lt_lips             TYPE STANDARD TABLE OF lips.
+  DATA: lt_vbap             TYPE TABLE OF vbap.
+  DATA: lv_vbeln_vl         TYPE vbeln_vl.
+  DATA: lv_wbstk            TYPE likp-wbstk.
+
+  " Config Variables
+  DATA: lv_target_bill_type TYPE fkart.
+  DATA: lv_error_found      TYPE abap_bool.
+  " =========================================================
+  " [STEP 0] PREPARATION & CLEANUP
+  " =========================================================
+  " Xóa thông báo lỗi cũ
   CLEAR cs_tracking_line-error_msg.
-  lv_vbeln_alpha = is_tracking_line-delivery_document.
+  " phải xóa sạch các thông tin của Billing cũ/Cancel cũ trên giao diện ALV.
+  " Nếu không xóa, ALV vẫn lưu số Cancel cũ -> Gây lỗi khi thực hiện Cancel tiếp.
+  CLEAR: cs_tracking_line-billing_document,
+         cs_tracking_line-bill_doc_cancel,  " <--- Xóa số Cancel cũ
+         cs_tracking_line-fi_doc_billing,   " <--- Xóa số FI cũ
+         cs_tracking_line-fi_doc_cancel.    " <--- Xóa số FI Cancel cũ
 
-  IF lv_vbeln_alpha IS INITIAL.
-    cs_tracking_line-error_msg = 'ERROR: Dòng này không có Delivery Document.'.
-    EXIT.
+  " =========================================================
+  " [STEP 1] DETERMINE BILLING TYPE
+  " =========================================================
+  CASE is_tracking_line-order_type.
+    WHEN 'ZORR' OR 'ZTP' OR 'ZSC' OR 'ZRAS' OR 'ZFOC'.
+      lv_target_bill_type = 'ZFF'.
+    WHEN 'ZRET'.
+      lv_target_bill_type = 'ZRE'.
+    WHEN 'ZDR'.
+      lv_target_bill_type = 'ZLL2'.
+    WHEN 'ZCRR'.
+      lv_target_bill_type = 'ZGG2'.
+    WHEN OTHERS.
+      cs_tracking_line-error_msg = |ERROR: Order type { is_tracking_line-order_type } not configured.|.
+      EXIT.
+  ENDCASE.
+
+  " =========================================================
+  " [STEP 2] PREPARE DATA
+  " =========================================================
+  CASE is_tracking_line-order_type.
+
+      " -------------------------------------------------------
+      " GROUP 1: DELIVERY-RELATED BILLING (ZORR, ZFOC)
+      " -------------------------------------------------------
+    WHEN 'ZORR' OR 'ZFOC'.
+
+      lv_vbeln_vl = is_tracking_line-delivery_document.
+      IF lv_vbeln_vl IS INITIAL.
+        cs_tracking_line-error_msg = 'ERROR: Delivery Document is required.'.
+        EXIT.
+      ENDIF.
+
+      " Check PGI Status (Chỉ check nhanh 1 lần)
+      SELECT SINGLE wbstk FROM likp INTO lv_wbstk WHERE vbeln = lv_vbeln_vl.
+      IF lv_wbstk <> 'C'.
+        cs_tracking_line-error_msg = 'ERROR: PGI not completed (WBSTK <> C).'.
+        EXIT.
+      ENDIF.
+
+      " Get LIPS Items
+      SELECT * FROM lips INTO TABLE @lt_lips WHERE vbeln = @lv_vbeln_vl.
+      IF sy-subrc <> 0.
+        cs_tracking_line-error_msg = 'ERROR: Delivery items not found.'.
+        EXIT.
+      ENDIF.
+
+      LOOP AT lt_lips ASSIGNING FIELD-SYMBOL(<fs_lips>).
+        CLEAR ls_billingdata.
+        ls_billingdata-ref_doc    = <fs_lips>-vbeln.
+        ls_billingdata-ref_item   = <fs_lips>-posnr.
+        ls_billingdata-doc_type   = is_tracking_line-order_type.
+        ls_billingdata-ordbilltyp = lv_target_bill_type.
+        ls_billingdata-ref_doc_ca = 'J'. " Ref to Delivery
+        APPEND ls_billingdata TO lt_billingdata.
+      ENDLOOP.
+
+      " -------------------------------------------------------
+      " GROUP 2: ORDER-RELATED BILLING
+      " -------------------------------------------------------
+    WHEN 'ZTP' OR 'ZSC' OR 'ZRAS' OR 'ZDR' OR 'ZCRR' OR 'ZRET'.
+
+      " --- ZRET Specific Logic ---
+      IF is_tracking_line-order_type = 'ZRET'.
+        IF is_tracking_line-delivery_document IS INITIAL.
+          cs_tracking_line-error_msg = 'ERROR ZRET: Returns Delivery missing.'.
+          EXIT.
+        ENDIF.
+
+        SELECT SINGLE wbstk FROM likp INTO @lv_wbstk
+           WHERE vbeln = @is_tracking_line-delivery_document.
+        IF lv_wbstk <> 'C'.
+          cs_tracking_line-error_msg = 'ERROR ZRET: PGR not posted.'.
+          EXIT.
+        ENDIF.
+      ENDIF.
+
+      SELECT * FROM vbap INTO TABLE @lt_vbap
+        WHERE vbeln = @is_tracking_line-sales_document.
+
+      IF sy-subrc <> 0.
+        cs_tracking_line-error_msg = 'ERROR: Sales Order items not found.'.
+        EXIT.
+      ENDIF.
+
+      LOOP AT lt_vbap ASSIGNING FIELD-SYMBOL(<fs_vbap>).
+        " Check Reject
+        IF <fs_vbap>-abgru IS NOT INITIAL. CONTINUE. ENDIF.
+        " Check Billing Block
+        IF <fs_vbap>-faksp IS NOT INITIAL. CONTINUE. ENDIF.
+
+        " Quantity Logic
+        DATA: lv_qty_bill TYPE vbap-kwmeng.
+        lv_qty_bill = <fs_vbap>-kwmeng.
+        IF lv_qty_bill <= 0.
+          lv_qty_bill = <fs_vbap>-zmeng.
+        ENDIF.
+
+        " --- FILL DATA ---
+        CLEAR ls_billingdata.
+        ls_billingdata-ref_doc    = <fs_vbap>-vbeln.
+        ls_billingdata-ref_item   = <fs_vbap>-posnr.
+        ls_billingdata-doc_type   = is_tracking_line-order_type.
+        ls_billingdata-ordbilltyp = lv_target_bill_type.
+        ls_billingdata-ref_doc_ca = 'C'. " Ref to Order
+
+        " ZRAS Milestone Logic
+        IF is_tracking_line-order_type = 'ZRAS'.
+          CLEAR: ls_billingdata-req_qty, ls_billingdata-sales_unit.
+          ls_billingdata-bill_date  = is_tracking_line-req_delivery_date.
+          ls_billingdata-price_date = is_tracking_line-req_delivery_date.
+        ELSE.
+          ls_billingdata-req_qty    = lv_qty_bill.
+          ls_billingdata-sales_unit = <fs_vbap>-vrkme.
+        ENDIF.
+
+        APPEND ls_billingdata TO lt_billingdata.
+      ENDLOOP.
+
+      IF lt_billingdata IS INITIAL.
+        cs_tracking_line-error_msg = 'ERROR: No valid items found (Check Rejection/Block).'.
+        EXIT.
+      ENDIF.
+
+  ENDCASE.
+
+  " =========================================================
+  " [STEP 3] CALL BAPI
+  " =========================================================
+  IF lt_billingdata IS NOT INITIAL.
+    CALL FUNCTION 'BAPI_BILLINGDOC_CREATEMULTIPLE'
+      EXPORTING
+        testrun       = abap_false
+        posting       = abap_false
+      TABLES
+        billingdatain = lt_billingdata
+        success       = lt_success
+        return        = lt_return.
   ENDIF.
 
-  " 2. Lấy các item từ LIPS
-  SELECT *
-    FROM lips
-    INTO TABLE @lt_lips
-    WHERE vbeln = @lv_vbeln_alpha.
-  IF sy-subrc <> 0.
-    cs_tracking_line-error_msg = 'LỖI: Không tìm thấy item (LIPS) cho Delivery.'.
-    EXIT.
-  ENDIF.
+  " =========================================================
+  " [STEP 4] HANDLE RESULT
+  " =========================================================
+  READ TABLE lt_success INTO ls_success INDEX 1.
 
-  LOOP AT lt_lips ASSIGNING FIELD-SYMBOL(<fs_lips>).
-    CLEAR ls_billingdata.
-    ls_billingdata-ref_doc    = <fs_lips>-vbeln.
-    ls_billingdata-ref_item   = <fs_lips>-posnr.
-    ls_billingdata-doc_type   = 'ZSV'.
-    ls_billingdata-ordbilltyp = 'F2'.
-    ls_billingdata-ref_doc_ca = 'J'.
-    APPEND ls_billingdata TO lt_billingdata.
-  ENDLOOP.
-
-  IF lt_billingdata IS INITIAL.
-    cs_tracking_line-error_msg = 'Không tìm thấy item nào từ Delivery để tạo billing.'.
-    EXIT.
-  ENDIF.
-
-  "=========================================================
-  "=== 3. (SỬA LỖI ĐỒNG BỘ) Ép BAPI chạy Đồng bộ
-  "=========================================================
-  SET UPDATE TASK LOCAL.
-  "=========================================================
-
-  " 4. Gọi BAPI tạo Billing
-  CALL FUNCTION 'BAPI_BILLINGDOC_CREATEMULTIPLE'
-    EXPORTING
-      testrun       = abap_false
-      posting       = abap_false
-    TABLES
-      billingdatain = lt_billingdata
-      success       = lt_success
-      return        = lt_return.
-
-  " 5. Xử lý kết quả (Sửa logic)
-  READ TABLE lt_return INTO ls_return WITH KEY type = 'A'.
-  IF sy-subrc <> 0.
-    READ TABLE lt_return INTO ls_return WITH KEY type = 'E'.
-  ENDIF.
-
-  IF sy-subrc = 0.
-    " Lỗi
-    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-    CONCATENATE 'LỖI (' ls_return-id ' ' ls_return-number '): ' ls_return-message
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
-  ELSE.
-    " Thành công
-    "=========================================================
-    "=== (SỬA LỖI ĐỒNG BỘ) Dùng COMMIT WORK AND WAIT
-    "=========================================================
-    COMMIT WORK AND WAIT.
-    "=========================================================
-
-    READ TABLE lt_success INTO ls_success INDEX 1.
+  IF sy-subrc = 0 AND ls_success-bill_doc IS NOT INITIAL.
+    " --- SUCCESS ---
     lv_billdoc = ls_success-bill_doc.
 
-    CONCATENATE 'Billing ' lv_billdoc ' tạo thành công.'
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
+    " 1. Commit Work AND WAIT (Quan trọng cho Mass processing)
+    " WAIT = 'X' đảm bảo DB ghi xong trước khi trả về
+    CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+      EXPORTING
+        wait = 'X'.
+
+    " 2. Thông báo thành công
+    cs_tracking_line-billing_document = lv_billdoc.
+    cs_tracking_line-error_msg = |Success: Created { lv_billdoc }.|.
+
+  ELSE.
+    " --- FAILURE ---
+    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+
+    CLEAR cs_tracking_line-billing_document. " Xóa nếu tạo thất bại
+
+    " 1. Tìm lỗi cụ thể
+    LOOP AT lt_return INTO ls_return WHERE type = 'E' OR type = 'A'.
+      IF ls_return-id = 'VU'.
+        cs_tracking_line-error_msg = |Data Incomplete: { ls_return-message }|.
+      ELSE.
+        cs_tracking_line-error_msg = |ERROR: { ls_return-message }|.
+      ENDIF.
+      EXIT.
+    ENDLOOP.
+
+    " 2. Fallback nếu không thấy type E
+    IF cs_tracking_line-error_msg IS INITIAL.
+      LOOP AT lt_return INTO ls_return WHERE type = 'W' OR type = 'I'.
+        cs_tracking_line-error_msg = |WARNING: { ls_return-message }|.
+        EXIT.
+      ENDLOOP.
+    ENDIF.
+
+    IF cs_tracking_line-error_msg IS INITIAL.
+      cs_tracking_line-error_msg = 'ERROR: Failed (Unknown reason).'.
+    ENDIF.
+
   ENDIF.
 
 ENDFORM.
@@ -3600,136 +3002,46 @@ FORM process_reverse_pgi
   CHANGING
     cs_tracking_line TYPE ty_tracking.
 
-  " --- 1. Khai báo biến ---
-  DATA: lt_mesg  TYPE STANDARD TABLE OF mesg,
-        ls_mesg  TYPE mesg,
-        lv_wbstk TYPE likp-wbstk,
-        lv_subrc TYPE sy-subrc.
-  DATA: lv_vbtyp TYPE likp-vbtyp.
-  DATA: lv_delivery     TYPE vbeln_vl,
-        lv_full_message TYPE string.
-  DATA: lv_subrc_char(4) TYPE c.
+  DATA: lv_delivery TYPE vbeln_vl.
+  DATA: lv_result_raw TYPE string.
+  DATA: lv_msg_type   TYPE c LENGTH 1.
+  DATA: lv_msg_content TYPE string.
 
-  "=========================================================
-  "=== SỬA LỖI GỐC RỄ (FIX STALE DATA & MEMORY)
-  "=========================================================
-  " 1. Xóa message cũ
-  CLEAR cs_tracking_line-error_msg.
-
-  " 2. Lấy Delivery & Convert
+  " 1. Get Delivery
   lv_delivery = is_tracking_line-delivery_document.
   IF lv_delivery IS INITIAL.
-    cs_tracking_line-error_msg = 'LỖI: Không có Delivery Document để Reverse.'.
+    cs_tracking_line-error_msg = 'ERROR: No Delivery Document found.'.
     EXIT.
   ENDIF.
 
-  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-    EXPORTING input  = lv_delivery
-    IMPORTING output = lv_delivery.
+  " 2. Ensure previous data committed
+  COMMIT WORK AND WAIT.
 
-  "👉 THÊM MỚI: Xóa Buffer DB để đảm bảo đọc dữ liệu mới nhất
-  CALL FUNCTION 'BUFFER_REFRESH_ALL'.
+  " 3. Clear memory
+  FREE MEMORY ID 'Z_PGI_RESULT'.
 
-  "👉 THÊM MỚI: Xóa Global Memory của Function Group Delivery (Quan trọng nhất)
-  " Nếu không có dòng này, hệ thống vẫn 'nhớ' Delivery đang có Billing
-  CALL FUNCTION 'LE_DELIVERY_REFRESH_BUFFER'.
+  " 4. CALL WORKER REPORT
+  SUBMIT zpg_reverse_pgi_worker
+    WITH p_vbeln = lv_delivery
+    AND RETURN.
 
-  "👉 THÊM MỚI: Chờ 1 giây để bảng VBFA cập nhật xong trạng thái Hủy Billing
-  WAIT UP TO 1 SECONDS.
-  "=========================================================
+  " 5. Receive result
+  IMPORT result = lv_result_raw FROM MEMORY ID 'Z_PGI_RESULT'.
+  FREE MEMORY ID 'Z_PGI_RESULT'.
 
-  " 3. CHECK 1: Đã PGI chưa?
-  SELECT SINGLE wbstk
-    FROM likp
-    WHERE vbeln = @lv_delivery
-    INTO @lv_wbstk
-    BYPASSING BUFFER.
+  " 6. Analyze result
+  IF lv_result_raw IS NOT INITIAL.
+    SPLIT lv_result_raw AT ':' INTO lv_msg_type lv_msg_content.
 
-  IF lv_wbstk <> 'C'.
-    cs_tracking_line-error_msg = 'LỖI: Delivery chưa PGI (WBSTK <> C).'.
-    EXIT.
-  ENDIF.
-
-  " 4. CHECK 2: Đã Billing chưa? (Kiểm tra lại VBFA mới nhất)
-  SELECT vbeln
-    FROM vbfa
-    WHERE vbelv   = @lv_delivery
-      AND vbtyp_n = 'M'
-    INTO TABLE @DATA(lt_bills)
-    BYPASSING BUFFER.
-
-  IF sy-subrc = 0.
-    LOOP AT lt_bills ASSIGNING FIELD-SYMBOL(<fs_bill>).
-      " Kiểm tra xem Bill này có còn Active không (FKSTO <> X)
-      SELECT SINGLE vbeln
-        FROM vbrk
-        WHERE vbeln = @<fs_bill>-vbeln
-          AND fksto <> 'X'
-        INTO @DATA(lv_active_bill)
-        BYPASSING BUFFER.
-
-      IF sy-subrc = 0.
-        CONCATENATE 'LỖI: Phải Hủy Billing Doc ' lv_active_bill ' trước khi Reverse PGI.'
-               INTO cs_tracking_line-error_msg SEPARATED BY space.
-        RETURN.
-      ENDIF.
-    ENDLOOP.
-  ENDIF.
-
-  " 4b. Lấy VBTYP thực tế
-  SELECT SINGLE vbtyp
-    FROM likp
-    WHERE vbeln = @lv_delivery
-    INTO @lv_vbtyp
-    BYPASSING BUFFER.
-
-  IF sy-subrc <> 0.
-    lv_vbtyp = 'J'.
-  ENDIF.
-
-  " 5. Ép FM chạy Đồng bộ
-  SET UPDATE TASK LOCAL.
-
-  " 6. HÀNH ĐỘNG: Dùng FM 'WS_REVERSE_GOODS_ISSUE'
-  CALL FUNCTION 'WS_REVERSE_GOODS_ISSUE'
-    EXPORTING
-      i_vbeln               = lv_delivery
-      i_budat               = sy-datum
-      i_tcode               = 'VL09'
-      i_vbtyp               = lv_vbtyp
-    TABLES
-      t_mesg                = lt_mesg
-    EXCEPTIONS
-      error_reverse_posting = 1
-      OTHERS                = 2.
-
-  " 7. Xử lý kết quả
-  lv_subrc = sy-subrc.
-
-  IF lv_subrc = 0.
-    COMMIT WORK AND WAIT.
-    CONCATENATE 'Reverse PGI cho Delivery ' lv_delivery ' thành công.'
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
-  ELSE.
-    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-
-    READ TABLE lt_mesg INTO ls_mesg WITH KEY MSGTY = 'A'.
-    IF sy-subrc <> 0.
-      READ TABLE lt_mesg INTO ls_mesg WITH KEY MSGTY = 'E'.
-    ENDIF.
-
-    IF sy-subrc = 0.
-      MESSAGE ID ls_mesg-ARBGB TYPE 'S' NUMBER ls_mesg-TXTNR
-              WITH ls_mesg-MSGV1 ls_mesg-MSGV2 ls_mesg-MSGV3 ls_mesg-MSGV4
-              INTO lv_full_message.
-      CONCATENATE 'LỖI (' ls_mesg-ARBGB ' ' ls_mesg-TXTNR '): ' lv_full_message
-             INTO cs_tracking_line-error_msg.
+    IF lv_msg_type = 'S'.
+      " Success
+      cs_tracking_line-error_msg = lv_msg_content.
     ELSE.
-      WRITE lv_subrc TO lv_subrc_char.
-      CONDENSE lv_subrc_char.
-      CONCATENATE 'LỖI: Reverse PGI thất bại (sy-subrc = ' lv_subrc_char '). Không có message chi tiết.'
-             INTO cs_tracking_line-error_msg SEPARATED BY space.
+      " Failure
+      CONCATENATE 'ERROR FROM WORKER:' lv_msg_content INTO cs_tracking_line-error_msg SEPARATED BY space.
     ENDIF.
+  ELSE.
+    cs_tracking_line-error_msg = 'Unknown Error: Worker did not return a result.'.
   ENDIF.
 
 ENDFORM.
@@ -3745,47 +3057,43 @@ FORM process_cancel_billing
 
   DATA: lt_ret     TYPE STANDARD TABLE OF bapiret2,
         ls_ret     TYPE bapiret2,
-        lv_fksto   TYPE vbrk-fksto.
+        lv_fksto   TYPE vbrk-fksto,
+        ls_success TYPE bapivbrksuccess.
   DATA: lt_success TYPE STANDARD TABLE OF bapivbrksuccess.
 
-  " --- Biến tạm ---
-  DATA: lv_billing    TYPE vbeln_vf.
-  DATA: lv_cancel_doc TYPE vbeln_vf.
+  " --- Temp Vars ---
+  DATA: lv_billing    TYPE vbeln_vf,
+        lv_cancel_doc TYPE vbeln_vf.
 
-  " 1. Xóa message cũ
   CLEAR cs_tracking_line-error_msg.
 
-  " 2. Lấy số Billing
+  " 1. Get Billing
   lv_billing = is_tracking_line-billing_document.
+
   IF lv_billing IS INITIAL.
-    cs_tracking_line-error_msg = 'LỖI: Không có Billing Document để Hủy.'.
+    cs_tracking_line-error_msg = 'ERROR: No Billing Document to Cancel.'.
     EXIT.
   ENDIF.
 
-  " 3. CHECK: Đã Hủy chưa?
+  " 2. CHECK STATUS
   SELECT SINGLE fksto
     FROM vbrk
-    WHERE vbeln = @lv_billing
-    INTO @lv_fksto.
+    INTO @lv_fksto
+    WHERE vbeln = @lv_billing.
 
   IF sy-subrc <> 0.
-    CONCATENATE 'LỖI: Không tìm thấy Billing Doc ' lv_billing ' trong VBRK.'
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
+    cs_tracking_line-error_msg = |ERROR: Billing Doc { lv_billing } not found in system.|.
     EXIT.
   ENDIF.
 
   IF lv_fksto = 'X'.
-    CONCATENATE 'LỖI: Billing Doc ' lv_billing ' đã được Hủy trước đó.'
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
+    cs_tracking_line-error_msg = |ERROR: Billing Doc { lv_billing } was already cancelled.|.
     EXIT.
   ENDIF.
 
-  "=========================================================
-  "=== 4. Ép BAPI chạy Đồng bộ (Synchronous Update)
-  "=========================================================
+  " 3. CALL BAPI (Synchronous)
   SET UPDATE TASK LOCAL.
 
-  " 5. HÀNH ĐỘNG: Gọi BAPI Hủy
   CALL FUNCTION 'BAPI_BILLINGDOC_CANCEL1'
     EXPORTING
       billingdocument = lv_billing
@@ -3793,44 +3101,76 @@ FORM process_cancel_billing
       return          = lt_ret
       success         = lt_success.
 
-  " 6. Xử lý kết quả
-  READ TABLE lt_ret INTO ls_ret WITH KEY type = 'A'.
-  IF sy-subrc <> 0.
-    READ TABLE lt_ret INTO ls_ret WITH KEY type = 'E'.
-  ENDIF.
+  " 4. HANDLE RESULT
+  READ TABLE lt_success INTO ls_success INDEX 1.
 
   IF sy-subrc = 0.
-    " Lỗi
-    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-    CONCATENATE 'LỖI (' ls_ret-id ' ' ls_ret-number '): ' ls_ret-message
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
-  ELSE.
-    " Thành công
-    "=========================================================
-    "=== (QUAN TRỌNG) Commit và Giải phóng khóa
-    "=========================================================
-    COMMIT WORK AND WAIT.
+    " --- SUCCESS ---
 
-    "👉 THÊM MỚI: Giải phóng toàn bộ khóa để bước Reverse PGI không bị Lock
-    CALL FUNCTION 'DEQUEUE_ALL'.
-    "=========================================================
-
-    " Lấy số chứng từ hủy
+    " Get cancellation doc number from Message V1
     READ TABLE lt_ret INTO ls_ret WITH KEY type = 'S'.
     IF sy-subrc = 0.
       lv_cancel_doc = ls_ret-message_v1.
     ENDIF.
 
-    CONCATENATE 'Hủy Billing thành công (Doc mới: ' lv_cancel_doc ').'
-           INTO cs_tracking_line-error_msg SEPARATED BY space.
+    " Commit & Wait
+    CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+      EXPORTING
+        wait = 'X'.
+
+    " Dequeue
+    CALL FUNCTION 'DEQUEUE_ALL'.
+
+    " Check DB
+    DATA: lv_db_exist TYPE abap_bool.
+    DO 5 TIMES.
+      SELECT SINGLE vbeln FROM vbrk INTO @DATA(lv_check)
+        WHERE vbeln = @lv_billing
+          AND fksto = 'X'.
+
+      IF sy-subrc = 0.
+        lv_db_exist = abap_true.
+        EXIT.
+      ELSE.
+        WAIT UP TO '0.5' SECONDS.
+      ENDIF.
+    ENDDO.
+
+    IF lv_db_exist = abap_true.
+      CONCATENATE 'Cancellation successful. Cancel Doc:' lv_cancel_doc
+        INTO cs_tracking_line-error_msg SEPARATED BY space.
+    ELSE.
+      cs_tracking_line-error_msg = |WARNING: Cancellation sent for { lv_billing } but DB update is slow.|.
+    ENDIF.
+
+  ELSE.
+    " --- FAILURE ---
+    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+    CALL FUNCTION 'DEQUEUE_ALL'.
+
+    " Find Error
+    LOOP AT lt_ret INTO ls_ret WHERE type = 'E' OR type = 'A'.
+      CONCATENATE 'CANCELLATION ERROR:' ls_ret-message
+        INTO cs_tracking_line-error_msg SEPARATED BY space.
+      EXIT.
+    ENDLOOP.
+
+    " Specific Check (VF 009)
+    IF cs_tracking_line-error_msg IS INITIAL.
+      READ TABLE lt_ret INTO ls_ret WITH KEY id = 'VF' number = '009'.
+      IF sy-subrc = 0.
+        cs_tracking_line-error_msg = 'ERROR: Accounting document is Cleared. Reverse Clearing required first.'.
+      ELSE.
+        cs_tracking_line-error_msg = 'ERROR: Cancellation failed (Unknown cause, check log).'.
+      ENDIF.
+    ENDIF.
+
   ENDIF.
 
 ENDFORM.
 
 *&---------------------------------------------------------------------*
 *& Form PROCESS_RELEASE_TO_ACCOUNT
-*& Xử lý logic cho 1 DÒNG (được gọi từ PAI)
-*& (ĐÃ SỬA LỖI DUMP 'CONFLICT_LENG' - Tham số XVBRK)
 *&---------------------------------------------------------------------*
 FORM process_release_to_account
   USING
@@ -3838,18 +3178,14 @@ FORM process_release_to_account
   CHANGING
     cs_tracking_line TYPE ty_tracking.
 
-  DATA: lv_bill_doc     TYPE vbrk-vbeln,
-        lv_subrc_check  TYPE sy-subrc,
-        ls_vbrk_wa      TYPE vbrk.
+  DATA: lv_bill_doc    TYPE vbrk-vbeln,
+        lv_subrc_check TYPE sy-subrc,
+        ls_vbrk_wa     TYPE vbrk.
 
-  "===============================================
-  "=== KHAI BÁO BẢNG (VỚI KIỂU DỮ LIỆU CHÍNH XÁC TỪ FM)
-  "===============================================
+  " --- Variables (Table declarations kept same) ---
   DATA:
-    lt_vbrk_in  TYPE STANDARD TABLE OF vbrk,     " Dùng cho IT_VBRK
-    " --- SỬA LỖI DUMP (XVBRK): ---
-    lt_vbrk_out TYPE STANDARD TABLE OF vbrkvb,  " Dùng cho XVBRK (Kiểu đúng là VBRKVB)
-    " --- KẾT THÚC SỬA LỖI ---
+    lt_vbrk_in  TYPE STANDARD TABLE OF vbrk,
+    lt_vbrk_out TYPE STANDARD TABLE OF vbrkvb,
     lt_xkomfk   TYPE STANDARD TABLE OF komfk,
     lt_xkomv    TYPE STANDARD TABLE OF komv,
     lt_xthead   TYPE STANDARD TABLE OF theadvb,
@@ -3858,48 +3194,52 @@ FORM process_release_to_account
     lt_xvbrp    TYPE STANDARD TABLE OF vbrpvb,
     lt_xvbrl    TYPE STANDARD TABLE OF vbrlvb,
     lt_xvbss    TYPE STANDARD TABLE OF vbss.
-  "===============================================
-" 1. Xóa bộ đệm bảng (DB Buffer)
+
+  " 1. Refresh Buffers
   CALL FUNCTION 'BUFFER_REFRESH_ALL'.
-
-  "👉 2. QUAN TRỌNG NHẤT: Xóa bộ nhớ của Function Group Delivery (Global Memory)
-  " Hàm này bắt buộc hệ thống quên các thông tin Delivery đã load trước đó
   CALL FUNCTION 'LE_DELIVERY_REFRESH_BUFFER'.
-
-  "👉 3. Thêm Wait nhỏ để đảm bảo VBFA (Doc Flow) được DB cập nhật xong từ bước Cancel Bill
-  WAIT UP TO 1 SECONDS.
-  " 1. Xóa message lỗi cũ
   CLEAR cs_tracking_line-error_msg.
 
-  " 2. Kiểm tra xem dòng này có Bill Doc và lá cờ không
   lv_bill_doc = is_tracking_line-billing_document.
-  IF lv_bill_doc IS INITIAL OR is_tracking_line-release_flag IS INITIAL.
-    " Bỏ qua nếu không có lá cờ (không cần release)
+
+  " 2. CHECKS
+  IF lv_bill_doc IS INITIAL.
+    cs_tracking_line-error_msg = 'ERROR: No Billing Document number found.'.
     EXIT.
   ENDIF.
 
-  " 3. Ép chạy đồng bộ (Synchronous)
+  " Check RFBSK (Accounting Status)
+  DATA: lv_rfbsk TYPE vbrk-rfbsk.
+  SELECT SINGLE rfbsk FROM vbrk INTO lv_rfbsk WHERE vbeln = lv_bill_doc.
+
+  IF lv_rfbsk = 'C'.
+    cs_tracking_line-error_msg = |WARNING: Billing { lv_bill_doc } already Released (FI Posted).|.
+    EXIT.
+  ENDIF.
+
+  " Check Cancelled
+  DATA: lv_fksto TYPE vbrk-fksto.
+  SELECT SINGLE fksto FROM vbrk INTO lv_fksto WHERE vbeln = lv_bill_doc.
+  IF lv_fksto = 'X'.
+    cs_tracking_line-error_msg = |ERROR: Billing { lv_bill_doc } is Cancelled. Cannot Release.|.
+    EXIT.
+  ENDIF.
+
+  " 3. PREPARE & CALL FM
   SET UPDATE TASK LOCAL.
 
   REFRESH: lt_vbrk_in, lt_vbrk_out, lt_xkomfk, lt_xkomv,
            lt_xthead, lt_xvbfs, lt_xvbpa, lt_xvbrp, lt_xvbrl, lt_xvbss.
   CLEAR: ls_vbrk_wa.
 
-  " 4. Chuẩn bị dữ liệu cho FM (chỉ 1 dòng)
-  SELECT SINGLE *
-    FROM vbrk
-    INTO ls_vbrk_wa
-    WHERE vbeln = lv_bill_doc.
-
+  SELECT SINGLE * FROM vbrk INTO ls_vbrk_wa WHERE vbeln = lv_bill_doc.
   IF sy-subrc <> 0.
-    cs_tracking_line-error_msg = 'LỖI: Không đọc được VBRK cho Bill Doc.'.
+    cs_tracking_line-error_msg = 'ERROR: Could not read VBRK data.'.
     EXIT.
   ENDIF.
 
   APPEND ls_vbrk_wa TO lt_vbrk_in.
-  " (Bảng lt_vbrk_out được truyền vào rỗng để nhận kết quả)
 
-  " 5. Gọi FM (với các kiểu bảng đã khai báo đúng)
   CALL FUNCTION 'SD_INVOICE_RELEASE_TO_ACCOUNT'
     EXPORTING
       with_posting = 'B'
@@ -3910,33 +3250,43 @@ FORM process_release_to_account
       xthead       = lt_xthead
       xvbfs        = lt_xvbfs
       xvbpa        = lt_xvbpa
-      xvbrk        = lt_vbrk_out   " <== Bây giờ sẽ hết lỗi
+      xvbrk        = lt_vbrk_out
       xvbrp        = lt_xvbrp
       xvbrl        = lt_xvbrl
       xvbss        = lt_xvbss.
 
   lv_subrc_check = sy-subrc.
 
-  " 6. Kiểm tra kết quả
-  READ TABLE lt_xvbfs WITH KEY msgty = 'E' TRANSPORTING NO FIELDS.
-  IF sy-subrc = 0 OR lv_subrc_check <> 0.
-    " Lỗi
+  " 4. CHECK RESULTS
+  READ TABLE lt_xvbfs INTO DATA(ls_err) WITH KEY msgty = 'E'.
+  IF sy-subrc = 0.
+    " SAP Business Error
+    MESSAGE ID ls_err-msgid TYPE 'S' NUMBER ls_err-msgno
+            WITH ls_err-msgv1 ls_err-msgv2 ls_err-msgv3 ls_err-msgv4
+            INTO cs_tracking_line-error_msg.
+
+    CONCATENATE 'RELEASE ERROR: ' cs_tracking_line-error_msg INTO cs_tracking_line-error_msg.
     CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-    cs_tracking_line-error_msg = 'Lỗi Release. Kiểm tra trong VF02/VFX3.'.
+    EXIT.
+  ENDIF.
+
+  IF lv_subrc_check <> 0.
+    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+    cs_tracking_line-error_msg = 'Technical error calling Release FM (Subrc <> 0).'.
   ELSE.
-    " Thành công
     COMMIT WORK AND WAIT.
-    cs_tracking_line-error_msg = 'Released to Accounting thành công!'.
+    cs_tracking_line-error_msg = |Success: Billing { lv_bill_doc } released to Accounting.|.
   ENDIF.
 
 ENDFORM.
 
+
 *&---------------------------------------------------------------------*
 *& Form SETUP_JOB_SCHEDULE
-*& Logic: Tính UTC + Tạo Spool (Kết quả in) cho Job Background
 *&---------------------------------------------------------------------*
 FORM setup_job_schedule.
 
+  " --- KHAI BÁO BIẾN ---
   DATA: lv_start_date TYPE sy-datum,
         lv_start_time TYPE sy-uzeit,
         lv_jobcount   TYPE tbtcjob-jobcount.
@@ -3944,135 +3294,137 @@ FORM setup_job_schedule.
         ls_field  TYPE sval,
         lv_rc     TYPE c.
 
-*   --- 1. Biến xử lý thời gian (UTC) ---
-  DATA: lv_tstmp_input TYPE timestamp,
-        lv_tstmp_utc   TYPE timestamp,
-        lv_tstmp_temp  TYPE timestamp,
-        lv_date_server TYPE sy-datum,
-        lv_time_server TYPE sy-uzeit.
-  CONSTANTS: lc_seconds_vn_offset TYPE p VALUE 25200.
+  " Time Vars (Sử dụng TIMESTAMPL để tránh Warning rounding)
+  DATA: lv_tstmp_vn      TYPE timestampl,
+        lv_tstmp_current TYPE timestampl,
+        lv_date_server   TYPE sy-datum,
+        lv_time_server   TYPE sy-uzeit.
 
-*   --- 2. Biến xử lý Spool (QUAN TRỌNG) ---
+  " Spool Vars
   DATA: ls_pri_params TYPE pri_params,
         lv_valid_pri  TYPE c.
 
-*   =======================================================
-*   PHẦN 1: TÍNH TOÁN & POPUP (Giữ nguyên)
-*   =======================================================
-  GET TIME STAMP FIELD lv_tstmp_utc.
+  CONSTANTS: lc_jobname TYPE tbtcjob-jobname VALUE 'Z_AUTO_DELIV_PROTOTYPE'.
 
+  " --- 1. POPUP CHỌN NGÀY (Mặc định Ngày mai) ---
+  GET TIME STAMP FIELD lv_tstmp_current.
+
+  " Convert Server Time -> UTC+7 để hiển thị default date cho user
   TRY.
-      CALL METHOD cl_abap_tstmp=>add
-        EXPORTING tstmp = lv_tstmp_utc secs = lc_seconds_vn_offset
-        RECEIVING r_tstmp = lv_tstmp_temp.
+      CONVERT TIME STAMP lv_tstmp_current TIME ZONE 'UTC+7'
+              INTO DATE lv_start_date TIME lv_start_time.
     CATCH cx_root.
-      lv_tstmp_temp = lv_tstmp_utc.
+      lv_start_date = sy-datum.
   ENDTRY.
 
-  CONVERT TIME STAMP lv_tstmp_temp TIME ZONE 'UTC'
-          INTO DATE lv_start_date TIME lv_start_time.
-  lv_start_date = lv_start_date + 1.
+  lv_start_date = lv_start_date + 1. " Default: Ngày mai
 
   CLEAR: ls_field, lt_fields.
   ls_field-tabname = 'VBAK'. ls_field-fieldname = 'ERDAT'.
-  ls_field-fieldtext = 'Ngày chạy (Giờ VN)'. ls_field-value = lv_start_date.
+  ls_field-fieldtext = 'Run Date (VN Time)'. ls_field-value = lv_start_date.
   APPEND ls_field TO lt_fields.
 
   CALL FUNCTION 'POPUP_GET_VALUES'
-    EXPORTING popup_title = 'Lên lịch Job (Có Spool)'
-    IMPORTING returncode = lv_rc
-    TABLES fields = lt_fields.
+    EXPORTING
+      popup_title = 'Schedule Job (VN Time 00:15)'
+    IMPORTING
+      returncode  = lv_rc
+    TABLES
+      fields      = lt_fields.
 
-  IF lv_rc = 'A' OR sy-subrc <> 0. MESSAGE 'Đã hủy.' TYPE 'S'. RETURN. ENDIF.
+  IF lv_rc = 'A' OR sy-subrc <> 0. MESSAGE 'Cancelled.' TYPE 'S'. RETURN. ENDIF.
 
   READ TABLE lt_fields INTO ls_field INDEX 1.
   lv_start_date = ls_field-value.
-  lv_start_time = '000015'.
+  lv_start_time = '000015'. " Cố định 0h15 sáng
 
-*   =======================================================
-*   PHẦN 2: QUY ĐỔI GIỜ (Giữ nguyên)
-*   =======================================================
+  " --- 2. TÍNH TOÁN THỜI GIAN SERVER ---
+
+  " A. Tạo Timestamp từ input của User (Giờ VN)
   CONVERT DATE lv_start_date TIME lv_start_time
-          INTO TIME STAMP lv_tstmp_input TIME ZONE 'UTC'.
+          INTO TIME STAMP lv_tstmp_vn TIME ZONE 'UTC+7'.
 
-  DATA: lv_seconds_minus TYPE p.
-  lv_seconds_minus = 0 - lc_seconds_vn_offset.
+  " B. Kiểm tra quá khứ: Nếu thời gian user chọn <= thời gian hiện tại
+  "    => Cộng thêm 1 ngày (86400 giây) để tránh job chạy ngay lập tức.
+  IF lv_tstmp_vn <= lv_tstmp_current.
+    TRY.
+        CALL METHOD cl_abap_tstmp=>add
+          EXPORTING
+            tstmp   = lv_tstmp_vn
+            secs    = 86400
+          RECEIVING
+            r_tstmp = lv_tstmp_vn.
+      CATCH cx_root.
+    ENDTRY.
+    MESSAGE 'Time passed inside logic. Moved to next day.' TYPE 'S'.
+  ENDIF.
 
-  TRY.
-      CALL METHOD cl_abap_tstmp=>add
-        EXPORTING tstmp = lv_tstmp_input secs = lv_seconds_minus
-        RECEIVING r_tstmp = lv_tstmp_utc.
-    CATCH cx_root.
-  ENDTRY.
-
-  CONVERT TIME STAMP lv_tstmp_utc TIME ZONE sy-zonlo
+  " C. Convert Timestamp chuẩn về lại Ngày/Giờ của Server để gọi Job
+  CONVERT TIME STAMP lv_tstmp_vn TIME ZONE sy-zonlo
           INTO DATE lv_date_server TIME lv_time_server.
 
-*   =======================================================
-*   PHẦN 3: CẤU HÌNH SPOOL (ĐÂY LÀ PHẦN BẠN ĐANG THIẾU)
-*   =======================================================
+  " --- 3. SPOOL CONFIG ---
   CALL FUNCTION 'GET_PRINT_PARAMETERS'
     EXPORTING
       no_dialog      = 'X'
       mode           = 'CURRENT'
-      destination    = 'LP01'    " <== Bắt buộc có máy in ảo này
+      destination    = 'LP01'
       line_count     = 65
-      line_size      = 255       " Khổ rộng để in không bị cắt
+      line_size      = 255
       expiration     = 1
-      release        = ' '       " Chỉ lưu Spool, không in ra giấy
       new_list_id    = 'X'
     IMPORTING
       out_parameters = ls_pri_params
       valid          = lv_valid_pri
-    EXCEPTIONS OTHERS = 4.
+    EXCEPTIONS
+      OTHERS         = 4.
 
   IF sy-subrc <> 0 OR lv_valid_pri <> 'X'.
-    MESSAGE 'Lỗi: Không lấy được tham số in (Spool).' TYPE 'S' DISPLAY LIKE 'E'.
+    MESSAGE 'Error: Spool parameters failed.' TYPE 'S' DISPLAY LIKE 'E'.
     RETURN.
   ENDIF.
 
-*   =======================================================
-*   PHẦN 4: SUBMIT JOB
-*   =======================================================
-  PERFORM delete_existing_released_job USING gv_jobname.
+  " --- 4. SUBMIT JOB ---
+  PERFORM delete_existing_released_job USING lc_jobname.
 
   CALL FUNCTION 'JOB_OPEN'
-    EXPORTING jobname = gv_jobname
-    IMPORTING jobcount = lv_jobcount.
+    EXPORTING
+      jobname  = lc_jobname
+    IMPORTING
+      jobcount = lv_jobcount.
 
-*   --- QUAN TRỌNG: TRUYỀN THAM SỐ IN VÀO ĐÂY ---
   CALL FUNCTION 'JOB_SUBMIT'
     EXPORTING
-      jobname    = gv_jobname
-      jobcount   = lv_jobcount
-      report     = 'ZSD4_AUTO_DELIVERY_JOB'
-      authcknam  = sy-uname
-      priparams  = ls_pri_params   " <== Dòng này tạo ra Spool List
-    EXCEPTIONS OTHERS = 1.
+      jobname   = lc_jobname
+      jobcount  = lv_jobcount
+      report    = 'ZSD4_AUTO_DELIVERY_JOB'
+      authcknam = sy-uname
+      priparams = ls_pri_params
+    EXCEPTIONS
+      OTHERS    = 1.
 
-  IF sy-subrc <> 0. MESSAGE 'Lỗi Job_Submit' TYPE 'S'. RETURN. ENDIF.
+  IF sy-subrc <> 0. MESSAGE 'Error Job_Submit' TYPE 'S'. RETURN. ENDIF.
 
+  " --- 5. JOB CLOSE ---
   CALL FUNCTION 'JOB_CLOSE'
     EXPORTING
-      jobname   = gv_jobname
+      jobname   = lc_jobname
       jobcount  = lv_jobcount
       sdlstrtdt = lv_date_server
       sdlstrttm = lv_time_server
-      prddays   = 1
-    EXCEPTIONS OTHERS = 1.
+      prddays   = 1    " Lặp lại hàng ngày
+    EXCEPTIONS
+      OTHERS    = 1.
 
   IF sy-subrc = 0.
-    MESSAGE |Đã lên lịch & tạo Spool. (Server Time: { lv_time_server })| TYPE 'S'.
+    MESSAGE |Scheduled OK. Next run (Server Time): { lv_date_server } { lv_time_server }| TYPE 'S'.
   ELSE.
-    MESSAGE 'Lỗi Job_Close' TYPE 'S'.
+    MESSAGE 'Error Job_Close' TYPE 'S'.
   ENDIF.
 
 ENDFORM.
-
 *&---------------------------------------------------------------------*
 *& Form DELETE_EXISTING_RELEASED_JOB
-*& Mục đích: Tìm và xóa các Job cũ đã lên lịch (trạng thái Released)
-*& để tránh việc tạo trùng lặp nhiều Job chạy cùng lúc.
 *&---------------------------------------------------------------------*
 FORM delete_existing_released_job USING iv_jobname TYPE tbtcjob-jobname.
 
@@ -4080,17 +3432,17 @@ FORM delete_existing_released_job USING iv_jobname TYPE tbtcjob-jobname.
   DATA: ls_return_select TYPE bapiret2.
   DATA: ls_return_delete TYPE bapiret2.
 
-  " 1. Chuẩn bị tham số tìm kiếm
+  " 1. Search Params
   DATA: ls_job_param TYPE bapixmjsel.
   CLEAR ls_job_param.
   ls_job_param-jobname  = iv_jobname.
   ls_job_param-username = '*'.
-  ls_job_param-schedul  = 'X'. " Chỉ lọc các Job đang chờ chạy (Released)
+  ls_job_param-schedul  = 'X'. " Only Released jobs
 
   DATA: lv_ext_user TYPE bapixmlogr-extuser.
   lv_ext_user = sy-uname.
 
-  " 2. Tìm kiếm Job cũ
+  " 2. Search
   CALL FUNCTION 'BAPI_XBP_JOB_SELECT'
     EXPORTING
       job_select_param   = ls_job_param
@@ -4100,7 +3452,7 @@ FORM delete_existing_released_job USING iv_jobname TYPE tbtcjob-jobname.
     TABLES
       selected_jobs      = lt_joblist.
 
-  " 3. Nếu tìm thấy thì xóa
+  " 3. Delete
   LOOP AT lt_joblist ASSIGNING FIELD-SYMBOL(<fs_job>).
     CLEAR ls_return_delete.
 
@@ -4111,13 +3463,14 @@ FORM delete_existing_released_job USING iv_jobname TYPE tbtcjob-jobname.
         external_user_name = lv_ext_user
       IMPORTING
         return             = ls_return_delete.
+
+    MESSAGE |Found and deleted old schedule (ID: { <fs_job>-jobcount })| TYPE 'S'.
   ENDLOOP.
 
 ENDFORM.
 
 *&---------------------------------------------------------------------*
 *& Form SHOW_JOB_MONITOR_POPUP
-*& Mục đích: Hiển thị lịch sử chạy Job (Đọc từ JOB LOG - SM37)
 *&---------------------------------------------------------------------*
 FORM show_job_monitor_popup.
 
@@ -4129,7 +3482,7 @@ FORM show_job_monitor_popup.
            items_found TYPE i,
            success_cnt TYPE i,
            error_cnt   TYPE i,
-           message     TYPE string,
+           message     TYPE string, " Cột Note
            jobcount    TYPE tbtcjob-jobcount,
          END OF ty_job_report.
 
@@ -4137,16 +3490,21 @@ FORM show_job_monitor_popup.
         ls_report TYPE ty_job_report,
         lt_tbtco  TYPE TABLE OF tbtco.
 
-  " --- Biến để đọc Job Log ---
+  " Job Log Vars
   DATA: lt_joblog TYPE TABLE OF tbtc5,
         ls_joblog TYPE tbtc5.
+
+  " Biến mới để xử lý list thành công
+  DATA: lv_created_doc  TYPE string,
+        lv_success_list TYPE string,
+        lv_first_error  TYPE string.
 
   " ALV Objects
   DATA: lo_alv     TYPE REF TO cl_salv_table,
         lo_columns TYPE REF TO cl_salv_columns_table,
         lo_col     TYPE REF TO cl_salv_column.
 
-  " 1. Lấy 20 Job gần nhất
+  " 1. Get last 20 jobs
   SELECT * FROM tbtco
     INTO TABLE lt_tbtco
     UP TO 20 ROWS
@@ -4154,16 +3512,15 @@ FORM show_job_monitor_popup.
     ORDER BY sdlstrtdt DESCENDING sdlstrttm DESCENDING.
 
   IF lt_tbtco IS INITIAL.
-    MESSAGE 'Chưa có lịch sử chạy Job nào.' TYPE 'S' DISPLAY LIKE 'W'.
+    MESSAGE 'No Job history found.' TYPE 'S' DISPLAY LIKE 'W'.
     RETURN.
   ENDIF.
 
-  " 2. Xử lý từng dòng Job
+  " 2. Process Logs
   LOOP AT lt_tbtco INTO DATA(ls_job).
-    CLEAR ls_report.
+    CLEAR: ls_report, lv_success_list, lv_first_error.
     ls_report-jobcount = ls_job-jobcount.
 
-    " --- Phân loại trạng thái ---
     CASE ls_job-status.
       WHEN 'F'. " Finished
         ls_report-status_icon = '@5B@'. " Green
@@ -4171,58 +3528,75 @@ FORM show_job_monitor_popup.
         ls_report-run_date    = ls_job-strtdate.
         ls_report-run_time    = ls_job-strttime.
 
-        " ========================================================
-        " [FIX LỖI DUMP] SỬA TÊN THAM SỐ TABLES
-        " ========================================================
         REFRESH lt_joblog.
         CALL FUNCTION 'BP_JOBLOG_READ'
           EXPORTING
             jobname   = ls_job-jobname
             jobcount  = ls_job-jobcount
           TABLES
-            joblogtbl = lt_joblog  " <== ĐÃ SỬA: joblog -> joblogtbl
+            joblogtbl = lt_joblog
           EXCEPTIONS
-            cant_read_joblog = 1
-            jobcount_missing = 2
-            jobname_missing  = 3
-            joblog_is_empty  = 4
-            OTHERS           = 5.
+            OTHERS    = 5.
 
         IF sy-subrc = 0.
-          " Quét nội dung Log
           LOOP AT lt_joblog INTO ls_joblog.
 
-            " 1. Đếm thành công (Tìm chữ 'THÀNH CÔNG')
-            IF ls_joblog-text CS 'THÀNH CÔNG'.
+            " --- [LOGIC MỚI: Tách số chứng từ] ---
+            IF ls_joblog-text CS 'SUCCESS'.
               ADD 1 TO ls_report-success_cnt.
+
+              " Tìm số chứng từ trong log (Format: Created Delivery XXXXX)
+
+              FIND PCRE 'Delivery\s+(\d+)' IN ls_joblog-text SUBMATCHES lv_created_doc.
+
+              IF sy-subrc = 0.
+                IF lv_success_list IS INITIAL.
+                  lv_success_list = lv_created_doc.
+                ELSE.
+                  " Nối chuỗi các số tìm được, cách nhau dấu phẩy
+                  lv_success_list = |{ lv_success_list }, { lv_created_doc }|.
+                ENDIF.
+              ENDIF.
             ENDIF.
 
-            " 2. Đếm lỗi (Tìm chữ 'LỖI')
-            IF ls_joblog-text CS 'LỖI'.
+            IF ls_joblog-text CS 'ERROR'.
               ADD 1 TO ls_report-error_cnt.
+              " Lưu lỗi đầu tiên tìm thấy để backup
+              IF lv_first_error IS INITIAL.
+                lv_first_error = ls_joblog-text.
+              ENDIF.
             ENDIF.
 
-            " 3. Lấy số lượng tìm thấy (Tìm chữ 'Tìm thấy')
-            IF ls_joblog-text CS 'Tìm thấy'.
-              " Format: 'Tìm thấy 5 items...' -> Lấy số 5
-              FIND REGEX '(\d+)' IN ls_joblog-text SUBMATCHES DATA(lv_num).
+            " Tìm số lượng items Found
+            IF ls_joblog-text CS 'Found' OR ls_joblog-text CS 'Tìm thấy'.
+              FIND PCRE '(\d+)' IN ls_joblog-text SUBMATCHES DATA(lv_num).
               ls_report-items_found = lv_num.
             ENDIF.
 
-            " 4. Lấy ghi chú lỗi cuối cùng (nếu có)
-            IF ls_report-message IS INITIAL AND ls_joblog-text CS 'LỖI'.
-               ls_report-message = ls_joblog-text.
-            ENDIF.
           ENDLOOP.
+
+          " --- [GÁN KẾT QUẢ VÀO CỘT NOTE] ---
+          IF lv_success_list IS NOT INITIAL.
+            " Nếu có thành công, hiện list số
+            IF ls_report-error_cnt > 0.
+
+              ls_report-message = |Created: { lv_success_list }|.
+            ELSE.
+              ls_report-message = |Created: { lv_success_list }|.
+            ENDIF.
+          ELSE.
+            " Nếu không có thành công nào, hiện lỗi (nếu có)
+            ls_report-message = lv_first_error.
+          ENDIF.
+
         ENDIF.
-        " ========================================================
 
       WHEN 'R'. " Released
         ls_report-status_icon = '@5C@'. " Yellow
         ls_report-status_text = 'Planned'.
         ls_report-run_date    = ls_job-sdlstrtdt.
         ls_report-run_time    = ls_job-sdlstrttm.
-        ls_report-message     = 'Đang chờ đến giờ...'.
+        ls_report-message     = 'Waiting for schedule...'.
 
       WHEN 'A'. " Active
         ls_report-status_icon = '@5D@'. " Red
@@ -4238,101 +3612,272 @@ FORM show_job_monitor_popup.
     APPEND ls_report TO lt_report.
   ENDLOOP.
 
-  " 3. Hiển thị ALV
+  " 3. Display ALV
   TRY.
       cl_salv_table=>factory(
         IMPORTING r_salv_table = lo_alv
         CHANGING  t_table      = lt_report ).
 
       lo_alv->set_screen_popup(
-        start_column = 10  end_column   = 110
+        start_column = 10  end_column   = 120  " Tăng độ rộng popup để nhìn rõ list
         start_line   = 5   end_line     = 20 ).
 
       lo_columns = lo_alv->get_columns( ).
       lo_columns->set_optimize( 'X' ).
 
       lo_col = lo_columns->get_column( 'STATUS_ICON' ). lo_col->set_long_text( 'Status' ).
-      lo_col = lo_columns->get_column( 'RUN_DATE' ).    lo_col->set_long_text( 'Ngày' ).
-      lo_col = lo_columns->get_column( 'RUN_TIME' ).    lo_col->set_long_text( 'Giờ' ).
-      lo_col = lo_columns->get_column( 'ITEMS_FOUND' ). lo_col->set_long_text( 'SL Tìm' ).
-      lo_col = lo_columns->get_column( 'SUCCESS_CNT' ). lo_col->set_long_text( 'Tạo OK' ).
-      lo_col = lo_columns->get_column( 'ERROR_CNT' ).   lo_col->set_long_text( 'Lỗi' ).
-      lo_col = lo_columns->get_column( 'MESSAGE' ).     lo_col->set_long_text( 'Ghi chú' ).
+      lo_col = lo_columns->get_column( 'RUN_DATE' ).    lo_col->set_long_text( 'Date' ).
+      lo_col = lo_columns->get_column( 'RUN_TIME' ).    lo_col->set_long_text( 'Time' ).
+      lo_col = lo_columns->get_column( 'ITEMS_FOUND' ). lo_col->set_long_text( 'Found' ).
+      lo_col = lo_columns->get_column( 'SUCCESS_CNT' ). lo_col->set_long_text( 'Success' ).
+      lo_col = lo_columns->get_column( 'ERROR_CNT' ).   lo_col->set_long_text( 'Error' ).
+
+      " Đổi tên cột Note thành List/Note cho rõ nghĩa
+      lo_col = lo_columns->get_column( 'MESSAGE' ).     lo_col->set_long_text( 'Created Docs / Note' ).
+
       lo_col = lo_columns->get_column( 'JOBCOUNT' ).    lo_col->set_visible( abap_false ).
 
       lo_alv->display( ).
 
     CATCH cx_salv_msg.
-      MESSAGE 'Lỗi hiển thị ALV' TYPE 'S'.
+      MESSAGE 'ALV Display Error (Generic)' TYPE 'S'.
+    CATCH cx_salv_not_found.
+      MESSAGE 'ALV Error: Column not found' TYPE 'S'.
+    CATCH cx_salv_data_error.
+      MESSAGE 'ALV Error: Data Problem' TYPE 'S'.
+    CATCH cx_salv_existing.
+      MESSAGE 'ALV Error: Existing' TYPE 'S'.
   ENDTRY.
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form UPDATE_STATUS_COUNTS
-*&---------------------------------------------------------------------*
-*& Calculates totals and updates global count variables for Screen 200
-*&---------------------------------------------------------------------*
-*FORM update_status_counts.
-*  " --- Header ---
-*  DESCRIBE TABLE gt_hd_val  LINES DATA(lv_h_val).  " Validated (Chờ xử lý)
-*  DESCRIBE TABLE gt_hd_suc  LINES DATA(lv_h_suc).  " Success
-*  DESCRIBE TABLE gt_hd_fail LINES DATA(lv_h_fail). " Failed
-*
-*  " --- Item ---
-*  DESCRIBE TABLE gt_it_val  LINES DATA(lv_i_val).
-*  DESCRIBE TABLE gt_it_suc  LINES DATA(lv_i_suc).
-*  DESCRIBE TABLE gt_it_fail LINES DATA(lv_i_fail).
-*
-*  " --- Condition (Mới) ---
-*  DESCRIBE TABLE gt_pr_val  LINES DATA(lv_c_val).
-*  DESCRIBE TABLE gt_pr_suc  LINES DATA(lv_c_suc).
-*  DESCRIBE TABLE gt_pr_fail LINES DATA(lv_c_fail).
-*
-*  " Gán vào biến toàn cục để FORM build_html dùng
-*  gv_cnt_h_val = lv_h_val. gv_cnt_h_suc = lv_h_suc. gv_cnt_h_fail = lv_h_fail.
-*  gv_cnt_i_val = lv_i_val. gv_cnt_i_suc = lv_i_suc. gv_cnt_i_fail = lv_i_fail.
-*  gv_cnt_c_val = lv_c_val. gv_cnt_c_suc = lv_c_suc. gv_cnt_c_fail = lv_c_fail.
-*
-*  " Tính tổng
-*  gv_cnt_h_tot = lv_h_val + lv_h_suc + lv_h_fail.
-*  gv_cnt_i_tot = lv_i_val + lv_i_suc + lv_i_fail.
-*  gv_cnt_c_tot = lv_c_val + lv_c_suc + lv_c_fail.
-*ENDFORM.
-
-*FORM update_status_counts.
-*  CLEAR: gv_cnt_val_ready, gv_cnt_val_incomp, gv_cnt_val_err,
-*         gv_cnt_suc_comp, gv_cnt_suc_incomp,
-*         gv_cnt_fail_err.
-*
-*  " --- 1. Card VALIDATED (Dựa trên bảng gt_hd_val) ---
-*  LOOP AT gt_hd_val INTO DATA(ls_val).
-*    CASE ls_val-status.
-*      WHEN 'READY'.  ADD 1 TO gv_cnt_val_ready.
-*      WHEN 'INCOMP'. ADD 1 TO gv_cnt_val_incomp.
-*      WHEN 'ERROR'.  ADD 1 TO gv_cnt_val_err.
-*    ENDCASE.
-*  ENDLOOP.
-*
-*  " --- 2. Card POSTED SUCCESS (Dựa trên bảng gt_hd_suc) ---
-*  LOOP AT gt_hd_suc INTO DATA(ls_suc).
-*    " Giả sử ta check field message hoặc status phụ để biết nó incomplete
-*    IF ls_suc-message CS 'Incomplete' OR ls_suc-message CS 'Warning'.
-*      ADD 1 TO gv_cnt_suc_incomp.
-*    ELSE.
-*      ADD 1 TO gv_cnt_suc_comp.
-*    ENDIF.
-*  ENDLOOP.
-*
-*  " --- 3. Card POSTED FAILED (Dựa trên bảng gt_hd_fail) ---
-*  DESCRIBE TABLE gt_hd_fail LINES gv_cnt_fail_err.
-*  " (Thường Failed là Error luôn, ít khi chia nhỏ, nhưng nếu muốn bạn có thể loop để đếm kỹ hơn)
-*
-*ENDFORM.
 
 *&---------------------------------------------------------------------*
-*& Form UPDATE_STATUS_COUNTS (Logic: Error > Incomplete > Ready)
+*& Form SHOW_DOCUMENT_FLOW_POPUP
 *&---------------------------------------------------------------------*
+*& Hiển thị Document Flow theo cấu trúc Cây (Sales -> Del -> PGI -> Inv -> FI)
+*& Sử dụng thuật toán Đệ quy (Recursive) để đảm bảo đúng thứ tự.
+*&---------------------------------------------------------------------*
+
+" 1. Khai báo Types Global cho Form
+TYPES: BEGIN OF ty_flow_display,
+         icon(4)       TYPE c,
+         level         TYPE i,
+         doc_category  TYPE char35,
+         doc_number    TYPE char20,
+         doc_date      TYPE datum,
+         doc_time      TYPE uzeit,
+         status        TYPE char50,
+       END OF ty_flow_display.
+
+DATA: gt_flow_display TYPE TABLE OF ty_flow_display,
+      gt_processed    TYPE SORTED TABLE OF vbeln_vf WITH UNIQUE KEY table_line.
+
+FORM show_document_flow_popup USING pv_row_index TYPE i.
+
+  DATA: ls_tracking TYPE ty_tracking,
+        ls_root     TYPE ty_flow_display,
+        ls_vbak     TYPE vbak.
+
+  " --- Reset dữ liệu toàn cục ---
+  CLEAR: gt_flow_display, gt_processed.
+
+  " 1. Lấy Sales Order gốc
+  READ TABLE gt_tracking INTO ls_tracking INDEX pv_row_index.
+  IF sy-subrc <> 0 OR ls_tracking-sales_document IS INITIAL. RETURN. ENDIF.
+
+  SELECT SINGLE * FROM vbak INTO ls_vbak WHERE vbeln = ls_tracking-sales_document.
+
+  " 2. Thêm Root (Sales Order) vào list
+  ls_root-level        = 1.
+  ls_root-icon         = '@49@'. " Order Icon
+  ls_root-doc_category = 'Sales Order'.
+  ls_root-doc_number   = ls_tracking-sales_document.
+  ls_root-doc_date     = ls_vbak-erdat.
+  ls_root-doc_time     = ls_vbak-erzet.
+  IF ls_vbak-gbstk = 'C'. ls_root-status = 'Completed'. ELSE. ls_root-status = 'In Process'. ENDIF.
+
+  APPEND ls_root TO gt_flow_display.
+  INSERT ls_tracking-sales_document INTO TABLE gt_processed.
+
+  " 3. Bắt đầu đệ quy tìm con
+  PERFORM find_children_recursive USING ls_tracking-sales_document 1.
+
+  " 4. Hiển thị ALV
+  PERFORM display_alv_flow.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Form FIND_CHILDREN_RECURSIVE
+*&---------------------------------------------------------------------*
+*& Đệ quy tìm con - Đã FIX hiển thị Reversal Goods Issue (h)
+*&---------------------------------------------------------------------*
+FORM find_children_recursive USING pv_parent_vbeln TYPE vbeln_vf
+                                   pv_parent_level TYPE i.
+
+  DATA: lt_vbfa TYPE TABLE OF vbfa,
+        ls_vbfa TYPE vbfa,
+        ls_node TYPE ty_flow_display.
+
+  DATA: lv_current_level TYPE i.
+  lv_current_level = pv_parent_level + 1.
+
+  " 1. Tìm tất cả con trực tiếp (Sort theo ngày giờ để đúng thứ tự xảy ra)
+  SELECT * FROM vbfa INTO TABLE lt_vbfa
+    WHERE vbelv = pv_parent_vbeln.
+
+  SORT lt_vbfa BY erdat ASCENDING erzet ASCENDING.
+
+  LOOP AT lt_vbfa INTO ls_vbfa.
+    " Check trùng lặp
+    READ TABLE gt_processed WITH TABLE KEY table_line = ls_vbfa-vbeln TRANSPORTING NO FIELDS.
+    IF sy-subrc = 0. CONTINUE. ENDIF.
+    INSERT ls_vbfa-vbeln INTO TABLE gt_processed.
+
+    " 2. Cấu hình hiển thị
+    CLEAR ls_node.
+    ls_node-level      = lv_current_level.
+    ls_node-doc_number = ls_vbfa-vbeln.
+    ls_node-doc_date   = ls_vbfa-erdat.
+    ls_node-doc_time   = ls_vbfa-erzet.
+
+    CASE ls_vbfa-vbtyp_n.
+      " --- Delivery ---
+      WHEN 'J' OR 'T'.
+        ls_node-doc_category = 'Outbound Delivery'.
+        ls_node-icon         = '@1X@'.
+        IF ls_vbfa-vbtyp_n = 'T'. ls_node-doc_category = 'Return Delivery'. ENDIF.
+
+      " --- Picking ---
+      WHEN 'Q'.
+        ls_node-doc_category = 'Picking Request'.
+        ls_node-icon         = '@0Q@'.
+        ls_node-status       = 'Completed'.
+
+      " --- Goods Issue (Xuất kho) ---
+      WHEN 'R'.
+        ls_node-doc_category = 'GD goods issue'.
+        ls_node-icon         = '@0Q@'.
+        ls_node-status       = 'Complete'. " SAP chuẩn dùng 'Complete'
+
+      WHEN 'h'.
+        ls_node-doc_category = 'RE goods deliv. rev.'. "
+        ls_node-icon         = '@0Q@'.
+        ls_node-status       = 'Complete'.
+
+      " --- Invoice ---
+      WHEN 'M' OR 'O' OR 'P'.
+        ls_node-doc_category = 'Invoice'.
+        ls_node-icon         = '@0W@'.
+        SELECT SINGLE vbeln FROM vbfa INTO @DATA(lv_x) WHERE vbelv = @ls_vbfa-vbeln AND vbtyp_n = 'N'.
+        IF sy-subrc = 0. ls_node-status = 'Cancelled'. ELSE. ls_node-status = 'Completed'. ENDIF.
+
+      " --- Invoice Cancellation ---
+      WHEN 'N' OR 'S'.
+        ls_node-doc_category = 'Cancel Invoice'.
+        ls_node-icon         = '@11@'.
+        ls_node-status       = 'Completed'.
+
+      WHEN OTHERS.
+        ls_node-doc_category = 'Subsequent Doc'.
+        ls_node-icon         = '@0O@'.
+    ENDCASE.
+
+    APPEND ls_node TO gt_flow_display.
+
+    " === 3. TÌM FI (JOURNAL ENTRY) ===
+    " Chỉ tìm FI cho Invoice (M,O,P) hoặc Cancel Invoice (N,S)
+    IF ls_vbfa-vbtyp_n CA 'MOPNS'.
+       PERFORM find_fi_document USING ls_vbfa-vbeln lv_current_level.
+    ENDIF.
+
+    " === 4. ĐỆ QUY TIẾP (Tìm con cháu) ===
+
+    IF ls_vbfa-vbtyp_n NE 'N' AND ls_vbfa-vbtyp_n NE 'S'.
+      PERFORM find_children_recursive USING ls_vbfa-vbeln lv_current_level.
+    ENDIF.
+
+  ENDLOOP.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Form FIND_FI_DOCUMENT
+*&---------------------------------------------------------------------*
+FORM find_fi_document USING pv_billing_doc TYPE vbeln_vf
+                            pv_level       TYPE i.
+
+  DATA: ls_bkpf   TYPE bkpf,
+        ls_fi_node TYPE ty_flow_display,
+        lv_awkey  TYPE string.
+
+  DATA: lv_augbl TYPE bsad-augbl,
+        lv_augdt TYPE bsad-augdt.
+
+  CONCATENATE pv_billing_doc '%' INTO lv_awkey.
+
+  SELECT SINGLE * FROM bkpf INTO ls_bkpf
+    WHERE awtyp = 'VBRK' AND awkey LIKE lv_awkey.
+
+  IF sy-subrc = 0.
+    ls_fi_node-level        = pv_level + 1. " Thụt vào 1 cấp
+    ls_fi_node-icon         = '@0Z@'.
+    ls_fi_node-doc_category = 'Journal Entry'.
+    CONCATENATE ls_bkpf-belnr '/' ls_bkpf-gjahr INTO ls_fi_node-doc_number.
+    ls_fi_node-doc_date     = ls_bkpf-bldat.
+    ls_fi_node-doc_time     = ls_bkpf-cputm.
+
+    " Check Cleared
+    CLEAR: lv_augbl, lv_augdt.
+    SELECT SINGLE augbl augdt FROM bsad INTO (lv_augbl, lv_augdt)
+      WHERE bukrs = ls_bkpf-bukrs
+        AND belnr = ls_bkpf-belnr
+        AND gjahr = ls_bkpf-gjahr.
+
+    IF sy-subrc = 0.
+      ls_fi_node-status = 'Cleared'.
+    ELSE.
+      ls_fi_node-status = 'Not Cleared'.
+    ENDIF.
+
+    APPEND ls_fi_node TO gt_flow_display.
+  ENDIF.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Form DISPLAY_ALV_FLOW
+*&---------------------------------------------------------------------*
+FORM display_alv_flow.
+  DATA: lo_alv     TYPE REF TO cl_salv_table,
+        lo_columns TYPE REF TO cl_salv_columns_table,
+        lo_col     TYPE REF TO cl_salv_column.
+
+  IF gt_flow_display IS INITIAL.
+    MESSAGE 'No document flow found.' TYPE 'S'. RETURN.
+  ENDIF.
+
+  TRY.
+      cl_salv_table=>factory( IMPORTING r_salv_table = lo_alv
+                              CHANGING  t_table      = gt_flow_display ).
+
+      lo_alv->set_screen_popup( start_column = 10 end_column = 100 start_line = 5 end_line = 25 ).
+      lo_columns = lo_alv->get_columns( ).
+      lo_columns->set_optimize( 'X' ).
+
+      lo_col = lo_columns->get_column( 'ICON' ). lo_col->set_medium_text( ' ' ).
+      lo_col = lo_columns->get_column( 'LEVEL' ). lo_col->set_medium_text( 'Lvl' ).
+      lo_col = lo_columns->get_column( 'DOC_CATEGORY' ). lo_col->set_medium_text( 'Document' ).
+      lo_col = lo_columns->get_column( 'DOC_NUMBER' ). lo_col->set_medium_text( 'Doc. Number' ).
+      lo_col = lo_columns->get_column( 'DOC_TIME' ). lo_col->set_visible( ' ' ). " Ẩn cột giờ đi cho đẹp
+
+      lo_alv->display( ).
+    CATCH cx_salv_msg.
+  ENDTRY.
+ENDFORM.
+
+"chú ý 2
 FORM update_status_counts.
   CLEAR: gv_cnt_val_ready, gv_cnt_val_incomp, gv_cnt_val_err,
          gv_cnt_suc_comp,  gv_cnt_suc_incomp,
@@ -4393,25 +3938,22 @@ FORM update_status_counts.
     ENDCASE.
   ENDLOOP.
 
+    " =========================================================
+  " 2. TAB POSTED SUCCESS (Sửa Logic: Dựa vào ICON)
   " =========================================================
-  " 2. TAB POSTED SUCCESS
-  " =========================================================
+  " Vì FORM load_data đã tính toán kỹ logic Icon (Vàng nếu có Warning Log, Xanh nếu sạch)
+  " Nên ở đây ta chỉ cần đếm theo Icon là chính xác nhất.
+
   LOOP AT gt_hd_suc INTO DATA(ls_suc).
-    lv_final_status = 'SUCCESS'.
 
-    " Logic: Nếu thiếu Delivery -> Coi như Incomplete Success (Vàng)
-    IF ls_suc-vbeln_dlv IS INITIAL.
-       lv_final_status = 'INCOMP'.
-    ENDIF.
-
-    " (Tùy chọn) Kiểm tra thêm Item/Cond nếu muốn kỹ hơn
-    " LOOP AT gt_it_suc ... WHERE status = 'W' ... -> lv_final_status = 'INCOMP'.
-
-    IF lv_final_status = 'INCOMP'.
+    IF ls_suc-icon = icon_led_yellow.
+      " Icon Vàng -> Có Incomplete Log hoặc Warning -> Đếm vào Incomplete
       ADD 1 TO gv_cnt_suc_incomp.
     ELSE.
+      " Icon Xanh (hoặc khác) -> Hoàn hảo -> Đếm vào Complete
       ADD 1 TO gv_cnt_suc_comp.
     ENDIF.
+
   ENDLOOP.
 
   " =========================================================
@@ -4472,55 +4014,61 @@ FORM pbo_screen_0111.
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form PERFORM_CREATE_SINGLE_SO
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM perform_create_single_so.
 
   " ========================================================================
-  " [PHẦN 1] CHUẨN BỊ DỮ LIỆU TỪ ALV (GIỮ NGUYÊN)
+  " [PHẦN 1] CHUẨN BỊ DỮ LIỆU TỪ ALV
   " ========================================================================
   IF go_grid_conditions IS BOUND.
     go_grid_conditions->check_changed_data( ).
   ENDIF.
 
+  " Logic lấy giá manual từ Grid Condition
   DATA: ls_manual_cond TYPE ty_cond_alv.
-  READ TABLE gt_conditions_alv INTO ls_manual_cond WITH KEY kschl = 'ZPRQ'.
-
-  IF sy-subrc = 0 AND ls_manual_cond-amount IS NOT INITIAL.
-    FIELD-SYMBOLS: <fs_curr_item> LIKE LINE OF gt_item_details.
+  LOOP AT gt_conditions_alv INTO ls_manual_cond WHERE amount IS NOT INITIAL.
+    FIELD-SYMBOLS: <fs_curr_item_ui> LIKE LINE OF gt_item_details.
     IF gv_current_item_idx > 0.
-      READ TABLE gt_item_details ASSIGNING <fs_curr_item> INDEX gv_current_item_idx.
+      READ TABLE gt_item_details ASSIGNING <fs_curr_item_ui> INDEX gv_current_item_idx.
       IF sy-subrc = 0.
-         <fs_curr_item>-cond_type  = ls_manual_cond-kschl.
-         <fs_curr_item>-unit_price = ls_manual_cond-amount.
-         <fs_curr_item>-currency   = ls_manual_cond-waers.
+         <fs_curr_item_ui>-cond_type  = ls_manual_cond-kschl.
+         <fs_curr_item_ui>-unit_price = ls_manual_cond-amount.
+         <fs_curr_item_ui>-currency   = ls_manual_cond-waers.
+         EXIT.
       ENDIF.
     ENDIF.
-  ENDIF.
+  ENDLOOP.
 
   " ========================================================================
   " [PHẦN 2] KHAI BÁO BIẾN
   " ========================================================================
-  DATA: ls_header_in       TYPE bapisdhd1,
-        ls_header_inx      TYPE bapisdhd1x,
-        lt_partner_in      TYPE TABLE OF bapiparnr,
-        lt_item_in         TYPE TABLE OF bapisditm,
-        lt_item_inx        TYPE TABLE OF bapisditmx,
-        lt_sched_in        TYPE TABLE OF bapischdl,
-        lt_sched_inx       TYPE TABLE OF bapischdlx,
-        " Biến cho Bước 1 (Create)
-        lt_return          TYPE TABLE OF bapiret2,
-        lv_vbeln           TYPE vbak-vbeln,
-        " Biến cho Bước 2 (Change)
-        lt_cond_change     TYPE TABLE OF bapicond,
-        lt_cond_change_x   TYPE TABLE OF bapicondx,
-        ls_bapi_h_x        TYPE bapisdh1x,
-        lt_return_change   TYPE TABLE OF bapiret2.
 
-  " Cấu trúc lưu tạm giá để dùng cho bước 2
+  " --- Biến cho BƯỚC 1 (SD_SALESDOCUMENT_CREATE) ---
+  DATA: ls_header_crt     TYPE bapisdhd1,
+        ls_header_crtx    TYPE bapisdhd1x,
+        lt_items_crt      TYPE TABLE OF bapisditm,
+        lt_items_crtx     TYPE TABLE OF bapisditmx,
+        lt_partners_crt   TYPE TABLE OF bapiparnr,
+        lt_schedules_crt  TYPE TABLE OF bapischdl,
+        lt_schedules_crtx TYPE TABLE OF bapischdlx,
+        lt_return_crt     TYPE TABLE OF bapiret2.
+
+  " --- Biến cho BƯỚC 2 (BAPI_SALESORDER_CHANGE) ---
+  DATA: lt_cond_change    TYPE TABLE OF bapicond,
+        lt_cond_change_x  TYPE TABLE OF bapicondx,
+        ls_header_chg_x   TYPE bapisdh1x,
+        lt_return_chg     TYPE TABLE OF bapiret2.
+
+  DATA: lv_salesdocument_ex TYPE vbak-vbeln.
+  DATA: lv_posnr            TYPE posnr.
+
+  " Biến xác định Business Object Động
+  DATA: lv_vbtyp   TYPE vbak-vbtyp,
+        lv_bus_obj TYPE char10.
+
+  " Cấu trúc buffer giá
   TYPES: BEGIN OF ty_price_buffer,
-           itm_number TYPE bapisditm-itm_number,
+           itm_number TYPE posnr,
            cond_type  TYPE kscha,
            amount     TYPE p DECIMALS 2,
            currency   TYPE waers,
@@ -4528,175 +4076,281 @@ FORM perform_create_single_so.
          END OF ty_price_buffer.
   DATA: lt_price_buffer TYPE TABLE OF ty_price_buffer.
 
+  " Biến phụ trợ xử lý số liệu
   DATA: lv_cond_val_str TYPE char28,
         lv_amount_temp  TYPE p DECIMALS 2,
         lv_qty_str      TYPE string,
         lv_qty_p        TYPE p DECIMALS 3,
-        lv_price_raw    TYPE string,
+        lv_price_str    TYPE string,
+        lv_price_p      TYPE p DECIMALS 2,
         lv_waers_check  TYPE tcurc-waers.
+
+  " [THÊM MỚI] Biến để hứng giá trị sau khi convert tiền tệ
+  DATA: lv_amount_internal TYPE bapicurr-bapicurr.
 
   FIELD-SYMBOLS: <fs_item> LIKE LINE OF gt_item_details.
   CLEAR gv_so_just_created.
 
-  " --- Validate Header ---
+  " ========================================================================
+  " [PHẦN 3] VALIDATE HEADER UI
+  " ========================================================================
   IF gs_so_heder_ui-so_hdr_sold_addr IS INITIAL OR gs_so_heder_ui-so_hdr_sold_addr = '0000000000'.
-    MESSAGE 'Sold-to Party is required.' TYPE 'E'. EXIT.
+    MESSAGE 'Sold-to Party is required.' TYPE 'S' DISPLAY LIKE 'E'. EXIT.
   ENDIF.
   IF gs_so_heder_ui-so_hdr_bstnk IS INITIAL.
-    MESSAGE 'Customer Reference is required.' TYPE 'E'. EXIT.
+    MESSAGE 'Customer Reference is required.' TYPE 'S' DISPLAY LIKE 'E'. EXIT.
+  ENDIF.
+  IF gt_item_details IS INITIAL.
+    MESSAGE 'Please enter at least one item.' TYPE 'S' DISPLAY LIKE 'E'. EXIT.
   ENDIF.
 
   " ========================================================================
-  " [PHẦN 3] VALIDATE ITEM & PREPARE DATA
+  " [PHẦN 4] XÁC ĐỊNH BUSINESS OBJECT
   " ========================================================================
-  IF gt_item_details IS NOT INITIAL.
-    LOOP AT gt_item_details ASSIGNING <fs_item>.
-      IF <fs_item>-matnr IS NOT INITIAL.
-        " Xử lý Quantity
-        CLEAR lv_qty_p.
-        lv_qty_str = <fs_item>-quantity.
-        REPLACE ALL OCCURRENCES OF ',' IN lv_qty_str WITH '.'.
-        TRY. lv_qty_p = lv_qty_str. CATCH cx_root. lv_qty_p = 0. ENDTRY.
-        IF lv_qty_p <= 0. MESSAGE |Item { sy-tabix }: Quantity required.| TYPE 'E'. EXIT. ENDIF.
-      ENDIF.
-    ENDLOOP.
+  SELECT SINGLE vbtyp INTO lv_vbtyp FROM tvak WHERE auart = gs_so_heder_ui-so_hdr_auart.
+  IF sy-subrc <> 0.
+    MESSAGE |Order Type { gs_so_heder_ui-so_hdr_auart } invalid configuration.| TYPE 'S' DISPLAY LIKE 'E'.
+    EXIT.
   ENDIF.
 
+  CASE lv_vbtyp.
+    WHEN 'C'. lv_bus_obj = 'BUS2032'.
+    WHEN 'H'. lv_bus_obj = 'BUS2102'.
+    WHEN 'I'. lv_bus_obj = 'BUS2032'.
+    WHEN 'K'. lv_bus_obj = 'BUS2094'.
+    WHEN 'L'. lv_bus_obj = 'BUS2096'.
+    WHEN 'G'. lv_bus_obj = 'BUS2034'.
+    WHEN OTHERS. lv_bus_obj = 'BUS2032'.
+  ENDCASE.
+
   " ========================================================================
-  " [PHẦN 4] MAPPING BAPI HEADER
+  " [PHẦN 5] MAPPING DATA CHO BƯỚC 1 (CREATE - KHÔNG GIÁ)
   " ========================================================================
-  " 1. Làm sạch Header Currency
+  " 1. Header
   CONDENSE gs_so_heder_ui-so_hdr_waerk NO-GAPS.
   TRANSLATE gs_so_heder_ui-so_hdr_waerk TO UPPER CASE.
   IF gs_so_heder_ui-so_hdr_waerk = 'EA'. gs_so_heder_ui-so_hdr_waerk = 'VND'. ENDIF.
   IF gs_so_heder_ui-so_hdr_waerk IS INITIAL. gs_so_heder_ui-so_hdr_waerk = 'VND'. ENDIF.
 
-  " Check Tồn Tại Trong Hệ Thống (TCURC)
   SELECT SINGLE waers INTO lv_waers_check FROM tcurc WHERE waers = gs_so_heder_ui-so_hdr_waerk.
-  IF sy-subrc <> 0. MESSAGE |Lỗi Header Currency: { gs_so_heder_ui-so_hdr_waerk } không tồn tại.| TYPE 'E'. EXIT. ENDIF.
+  IF sy-subrc <> 0. MESSAGE |Currency { gs_so_heder_ui-so_hdr_waerk } invalid.| TYPE 'S' DISPLAY LIKE 'E'. EXIT. ENDIF.
 
-  ls_header_in-doc_type   = gs_so_heder_ui-so_hdr_auart.
-  ls_header_in-sales_org  = gs_so_heder_ui-so_hdr_vkorg.
-  ls_header_in-distr_chan = gs_so_heder_ui-so_hdr_vtweg.
-  ls_header_in-division   = gs_so_heder_ui-so_hdr_spart.
-  ls_header_in-purch_no_c = gs_so_heder_ui-so_hdr_bstnk.
-  ls_header_in-doc_date   = gs_so_heder_ui-so_hdr_audat.
-  ls_header_in-currency   = gs_so_heder_ui-so_hdr_waerk.
-  ls_header_in-pmnttrms   = gs_so_heder_ui-so_hdr_zterm.
+  ls_header_crt-doc_type   = gs_so_heder_ui-so_hdr_auart.
+  ls_header_crt-sales_org  = gs_so_heder_ui-so_hdr_vkorg.
+  ls_header_crt-distr_chan = gs_so_heder_ui-so_hdr_vtweg.
+  ls_header_crt-division   = gs_so_heder_ui-so_hdr_spart.
+  ls_header_crt-purch_no_c = gs_so_heder_ui-so_hdr_bstnk.
+  ls_header_crt-doc_date   = gs_so_heder_ui-so_hdr_audat.
+  ls_header_crt-currency   = gs_so_heder_ui-so_hdr_waerk.
+  ls_header_crt-pmnttrms   = gs_so_heder_ui-so_hdr_zterm.
 
-  ls_header_inx = VALUE #( doc_type = 'X' sales_org = 'X' distr_chan = 'X' division = 'X'
-                           purch_no_c = 'X' doc_date = 'X' currency = 'X' pmnttrms = 'X' ).
-
+  " 2. Partner
   DATA(lv_sold_to_save) = gs_so_heder_ui-so_hdr_sold_addr.
   CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_sold_to_save IMPORTING output = lv_sold_to_save.
-  APPEND VALUE #( partn_role = 'AG' partn_numb = lv_sold_to_save ) TO lt_partner_in.
-  APPEND VALUE #( partn_role = 'WE' partn_numb = lv_sold_to_save ) TO lt_partner_in.
+  APPEND VALUE #( partn_role = 'AG' partn_numb = lv_sold_to_save ) TO lt_partners_crt.
+  APPEND VALUE #( partn_role = 'WE' partn_numb = lv_sold_to_save ) TO lt_partners_crt.
 
-  " ========================================================================
-  " [PHẦN 5] MAPPING ITEMS (LƯU Ý: KHÔNG MAP CONDITION VÀO BAPI 1)
-  " ========================================================================
+
+    "Chú ý 2
+    " 3. Items & Buffer Pricing (SỬA LẠI ĐOẠN NÀY)
   LOOP AT gt_item_details ASSIGNING <fs_item>.
     IF <fs_item>-matnr IS NOT INITIAL.
+      lv_posnr = sy-tabix * 10.
 
-      DATA(lv_posnr) = sy-tabix * 10.
+      " --- A. Map Item & Schedule Line (Giữ nguyên) ---
       DATA(lv_matnr_bapi) = <fs_item>-matnr.
       CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_matnr_bapi IMPORTING output = lv_matnr_bapi.
 
-      " Re-calculate Quantity
       CLEAR lv_qty_p.
       lv_qty_str = <fs_item>-quantity.
       REPLACE ALL OCCURRENCES OF ',' IN lv_qty_str WITH '.'.
       TRY. lv_qty_p = lv_qty_str. CATCH cx_root. lv_qty_p = 0. ENDTRY.
+      IF lv_qty_p <= 0. MESSAGE |Item { sy-tabix }: Quantity required.| TYPE 'S' DISPLAY LIKE 'E'. EXIT. ENDIF.
 
-      APPEND VALUE #( itm_number = lv_posnr material = lv_matnr_bapi
-                      target_qty = lv_qty_p target_qu = <fs_item>-unit
-                      plant = <fs_item>-plant store_loc = <fs_item>-store_loc ) TO lt_item_in.
+      " Map Item Create
+      APPEND VALUE #( itm_number = lv_posnr
+                      material   = lv_matnr_bapi
+                      target_qty = lv_qty_p
+                      sales_unit = <fs_item>-unit
+                      plant      = <fs_item>-plant
+                      store_loc  = <fs_item>-store_loc ) TO lt_items_crt.
 
-      APPEND VALUE #( itm_number = lv_posnr material = 'X' target_qty = 'X' target_qu = 'X'
-                      plant = 'X' store_loc = 'X' ) TO lt_item_inx.
+      " Map Schedule Line
+      IF lv_vbtyp = 'C' OR lv_vbtyp = 'H' OR lv_vbtyp = 'I'.
+         APPEND VALUE #( itm_number = lv_posnr
+                         req_qty    = lv_qty_p
+                         req_date   = <fs_item>-req_date ) TO lt_schedules_crt.
+      ENDIF.
 
-      APPEND VALUE #( itm_number = lv_posnr req_qty = lv_qty_p req_date = <fs_item>-req_date ) TO lt_sched_in.
-      APPEND VALUE #( itm_number = lv_posnr req_qty = 'X' req_date = 'X' ) TO lt_sched_inx.
+      " --- B. [FIX LỖI] LẤY TẤT CẢ CONDITIONS TỪ ALV VÀO BUFFER ---
+      " Thay vì lấy từ <fs_item> (chỉ chứa 1 giá), ta quét bảng gt_conditions_alv
 
-      " ------------------------------------------------------------------
-      " [QUAN TRỌNG] LƯU GIÁ VÀO BUFFER ĐỂ DÙNG CHO BƯỚC 2 (CHANGE)
-      " KHÔNG append vào lt_cond_in ở đây nữa!
-      " ------------------------------------------------------------------
-      IF <fs_item>-cond_type IS NOT INITIAL AND <fs_item>-unit_price IS NOT INITIAL.
+      DATA: ls_cond_ui TYPE ty_cond_alv.
+
+      LOOP AT gt_conditions_alv INTO ls_cond_ui.
+
+         " Chỉ xử lý các dòng có Amount khác 0 (hoặc Z100 có thể âm)
+*         IF ls_cond_ui-amount IS INITIAL AND ls_cond_ui-kschl <> 'Z100'. CONTINUE. ENDIF.
+          IF ls_cond_ui-amount IS INITIAL. CONTINUE. ENDIF.
+
+         " Bỏ qua các dòng Subtotal không phải là Condition Type thực (VD: Net Value, Gross Value)
+         " Mẹo: Check cột KSCHL có giá trị và không phải các mã ảo do mình tự đặt (NETW, GROS...)
+         IF ls_cond_ui-kschl IS INITIAL
+            OR ls_cond_ui-kschl = 'NETW'
+            OR ls_cond_ui-kschl = 'NET1'
+            OR ls_cond_ui-kschl = 'NET2'
+            OR ls_cond_ui-kschl = 'GROS'
+            OR ls_cond_ui-kschl = 'Z100'
+            OR ls_cond_ui-kschl = 'ZTAX'.
+            CONTINUE.
+         ENDIF.
+
+         " Xử lý Format Amount
+         lv_price_str = ls_cond_ui-amount.
+         DATA(lv_dummy) = -1.
+         FIND FIRST OCCURRENCE OF '.' IN lv_price_str MATCH OFFSET lv_dummy.
+         IF sy-subrc = 0.
+            FIND FIRST OCCURRENCE OF ',' IN lv_price_str MATCH OFFSET lv_dummy.
+            IF sy-subrc = 0. REPLACE ALL OCCURRENCES OF '.' IN lv_price_str WITH ''. ENDIF.
+         ENDIF.
+         REPLACE ALL OCCURRENCES OF ',' IN lv_price_str WITH '.'.
+         TRY. lv_amount_temp = lv_price_str. CATCH cx_root. lv_amount_temp = 0. ENDTRY.
 
          " Validate Currency
-         CONDENSE <fs_item>-currency NO-GAPS.
-         TRANSLATE <fs_item>-currency TO UPPER CASE.
-         IF <fs_item>-currency = 'EA'. <fs_item>-currency = 'VND'. ENDIF.
-         IF <fs_item>-currency IS INITIAL. <fs_item>-currency = gs_so_heder_ui-so_hdr_waerk. ENDIF.
+         DATA(lv_curr_itm) = ls_cond_ui-waers.
+         IF lv_curr_itm IS INITIAL. lv_curr_itm = gs_so_heder_ui-so_hdr_waerk. ENDIF.
 
-         " Validate Amount
-         lv_price_raw = <fs_item>-unit_price.
-         DATA(lv_last_dot) = -1. DATA(lv_last_comma) = -1.
-         FIND ALL OCCURRENCES OF '.' IN lv_price_raw MATCH OFFSET lv_last_dot.
-         FIND ALL OCCURRENCES OF ',' IN lv_price_raw MATCH OFFSET lv_last_comma.
-         IF lv_last_dot > lv_last_comma. REPLACE ALL OCCURRENCES OF ',' IN lv_price_raw WITH ''.
-         ELSEIF lv_last_comma > lv_last_dot. REPLACE ALL OCCURRENCES OF '.' IN lv_price_raw WITH ''. REPLACE ALL OCCURRENCES OF ',' IN lv_price_raw WITH '.'. ENDIF.
-         TRY. lv_amount_temp = lv_price_raw. CATCH cx_root. lv_amount_temp = 0. ENDTRY.
+*         " [QUAN TRỌNG] Nếu là %, BAPI cần đơn vị tiền tệ rỗng hoặc '%'
+*         IF ls_cond_ui-waers = '%'.
+*            lv_curr_itm = space.
+*         ENDIF.
 
-         " Lưu vào buffer
+         " Add vào Buffer (ZPRQ, ZDRP, Z100, ZTAX...)
          APPEND VALUE #( itm_number = lv_posnr
-                         cond_type  = <fs_item>-cond_type
+                         cond_type  = ls_cond_ui-kschl
                          amount     = lv_amount_temp
-                         currency   = <fs_item>-currency
+                         currency   = lv_curr_itm
                          unit       = <fs_item>-unit ) TO lt_price_buffer.
-      ENDIF.
+      ENDLOOP.
 
     ENDIF.
   ENDLOOP.
 
   " ========================================================================
-  " [BƯỚC 1] TẠO SO (CREATE - KHÔNG CÓ GIÁ)
+  " [BƯỚC 1] GỌI SD_SALESDOCUMENT_CREATE
   " ========================================================================
-  CALL FUNCTION 'BAPI_SALESORDER_CREATEFROMDAT2'
-    EXPORTING order_header_in = ls_header_in order_header_inx = ls_header_inx
-    IMPORTING salesdocument = lv_vbeln
-    TABLES return = lt_return order_items_in = lt_item_in order_items_inx = lt_item_inx
-           order_partners = lt_partner_in order_schedules_in = lt_sched_in order_schedules_inx = lt_sched_inx.
+  CALL FUNCTION 'SD_SALESDOCUMENT_CREATE'
+    EXPORTING
+      sales_header_in      = ls_header_crt
+      sales_header_inx     = ls_header_crtx
+      business_object      = lv_bus_obj
+    IMPORTING
+      salesdocument_ex     = lv_salesdocument_ex
+    TABLES
+      return               = lt_return_crt
+      sales_items_in       = lt_items_crt
+      sales_items_inx      = lt_items_crtx
+      sales_partners       = lt_partners_crt
+      sales_schedules_in   = lt_schedules_crt
+      sales_schedules_inx  = lt_schedules_crtx
+    EXCEPTIONS
+      OTHERS               = 1.
 
   " Check Lỗi Bước 1
   DATA: lv_err_step1 TYPE abap_bool.
-  LOOP AT lt_return ASSIGNING FIELD-SYMBOL(<ret>) WHERE type CA 'AEX'.
-    lv_err_step1 = abap_true. EXIT.
+  LOOP AT lt_return_crt INTO DATA(ls_ret1) WHERE type = 'E' OR type = 'A'.
+    lv_err_step1 = abap_true.
+    MESSAGE ID ls_ret1-id TYPE 'S' NUMBER ls_ret1-number
+            WITH ls_ret1-message_v1 ls_ret1-message_v2 ls_ret1-message_v3 ls_ret1-message_v4
+            DISPLAY LIKE 'E'.
+    EXIT.
   ENDLOOP.
 
   IF lv_err_step1 = abap_true.
     CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-    " ... (Code hiển thị lỗi giữ nguyên như cũ) ...
-    MESSAGE 'Lỗi khi tạo SO (Bước 1).' TYPE 'E'.
-    EXIT. " Thoát luôn nếu không tạo được SO
+    EXIT.
   ENDIF.
 
-  " *** BẮT BUỘC COMMIT ĐỂ CÓ VBELN TRONG DATABASE CHO BƯỚC 2 ***
-  CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = abap_true.
-
+  CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = 'X'.
 
   " ========================================================================
-  " [BƯỚC 2] CẬP NHẬT GIÁ (CHANGE - UPDATE GIÁ)
+  " [BƯỚC 2] GỌI BAPI_SALESORDER_CHANGE (UPDATE GIÁ)
   " ========================================================================
-  IF lv_vbeln IS NOT INITIAL AND lt_price_buffer IS NOT INITIAL.
+  IF lv_salesdocument_ex IS NOT INITIAL AND lt_price_buffer IS NOT INITIAL.
 
-    " Map dữ liệu từ Buffer vào cấu trúc BAPI CHANGE
-    LOOP AT lt_price_buffer INTO DATA(ls_buff).
+    REFRESH: lt_cond_change, lt_cond_change_x, lt_return_chg.
+    CLEAR ls_header_chg_x.
 
-       CLEAR lv_cond_val_str.
-       WRITE ls_buff-amount TO lv_cond_val_str CURRENCY ls_buff-currency NO-GROUPING.
-       IF lv_cond_val_str CS ','. REPLACE ALL OCCURRENCES OF ',' IN lv_cond_val_str WITH '.'. ENDIF.
+*    " [THÊM MỚI]: Khai báo biến trung gian đúng kiểu BAPI yêu cầu
+*    DATA: lv_bapi_input_amt TYPE bapicurr-bapicurr.
+
+      "Chú ý 5
+      LOOP AT lt_price_buffer INTO DATA(ls_buff).
+
+       " Biến tạm
+       DATA: lv_bapi_curr TYPE bapicond-currency,
+             lv_bapi_unit TYPE bapicond-cond_unit.
+
+       lv_bapi_curr = ls_buff-currency.
+       lv_bapi_unit = ls_buff-unit.
+
+       " Safety Check Currency
+       IF lv_bapi_curr IS INITIAL.
+          lv_bapi_curr = gs_so_heder_ui-so_hdr_waerk.
+          IF lv_bapi_curr IS INITIAL. lv_bapi_curr = 'VND'. ENDIF.
+       ENDIF.
+
+       " =================================================================
+       " [FINAL FIX]: TÁCH RIÊNG LOGIC ZDRP VÀ ZCRP
+       " =================================================================
+
+       " CASE 1: ZDRP (Đã test OK: Cần nhân 100)
+       IF ls_buff-cond_type = 'ZDRP'.
+          lv_bapi_unit   = '%'.
+          CLEAR lv_bapi_curr.       " Xóa Currency
+          ls_buff-amount = ls_buff-amount * 100. " ZDRP vẫn nhân 100
+
+       " CASE 2: ZCRP (Test mới: KHÔNG được nhân)
+       ELSEIF ls_buff-cond_type = 'ZCRP'.
+          lv_bapi_unit   = '%'.
+          CLEAR lv_bapi_curr.       " Xóa Currency
+          " ls_buff-amount = ls_buff-amount. " <<< GIỮ NGUYÊN (30 là 30)
+
+       " CASE 3: Các loại % khác (ZCF1...) hoặc Unit là %
+       ELSEIF ls_buff-cond_type = 'ZCF1' OR ls_buff-unit = '%'.
+          lv_bapi_unit   = '%'.
+          CLEAR lv_bapi_curr.
+          " Thử nghiệm mặc định: Không nhân (An toàn nhất)
+          " Nếu sau này ZCF1 cần nhân thì sửa sau
+
+       " CASE 4: TIỀN TỆ (VND...)
+       ELSE.
+          " Check TCURC
+          SELECT SINGLE waers INTO lv_waers_check FROM tcurc WHERE waers = lv_bapi_curr.
+          IF sy-subrc <> 0. lv_bapi_curr = 'VND'. ENDIF.
+
+          " Nhân 100 nếu là VND
+          DATA: lv_currdec TYPE tcurx-currdec.
+          CLEAR lv_currdec.
+          SELECT SINGLE currdec INTO lv_currdec FROM tcurx WHERE currkey = lv_bapi_curr.
+
+          IF sy-subrc = 0 AND lv_currdec = 0.
+             ls_buff-amount = ls_buff-amount * 100.
+          ENDIF.
+       ENDIF.
+
+       " 2. Convert sang String
+       lv_cond_val_str = ls_buff-amount.
        CONDENSE lv_cond_val_str NO-GAPS.
 
+       " 3. APPEND VÀO BAPI
        APPEND VALUE #( itm_number = ls_buff-itm_number
                        cond_type  = ls_buff-cond_type
                        cond_value = lv_cond_val_str
-                       currency   = ls_buff-currency
-                       cond_unit  = ls_buff-unit
+                       currency   = lv_bapi_curr
+                       cond_unit  = lv_bapi_unit
                        cond_p_unt = 1 ) TO lt_cond_change.
 
-       " Dùng 'I' ở đây (trong Change mode) sẽ hoạt động như Manual Entry
        APPEND VALUE #( itm_number = ls_buff-itm_number
                        cond_type  = ls_buff-cond_type
                        updateflag = 'I'
@@ -4706,221 +4360,74 @@ FORM perform_create_single_so.
                        cond_p_unt = 'X' ) TO lt_cond_change_x.
     ENDLOOP.
 
-    ls_bapi_h_x-updateflag = 'U'. " Cờ báo update Header
+    ls_header_chg_x-updateflag = 'U'.
 
     CALL FUNCTION 'BAPI_SALESORDER_CHANGE'
       EXPORTING
-        salesdocument    = lv_vbeln
-        order_header_inx = ls_bapi_h_x
+        salesdocument    = lv_salesdocument_ex
+        order_header_inx = ls_header_chg_x
       TABLES
-        return           = lt_return_change
+        return           = lt_return_chg
         conditions_in    = lt_cond_change
         conditions_inx   = lt_cond_change_x.
 
     " Check Lỗi Bước 2
     DATA: lv_err_step2 TYPE abap_bool.
-    LOOP AT lt_return_change ASSIGNING FIELD-SYMBOL(<ret2>) WHERE type CA 'AEX'.
+    LOOP AT lt_return_chg INTO DATA(ls_ret2) WHERE type CA 'AE'.
       lv_err_step2 = abap_true.
+      MESSAGE |Price Update Failed for SO { lv_salesdocument_ex }: { ls_ret2-message }| TYPE 'S' DISPLAY LIKE 'W'.
+      EXIT.
     ENDLOOP.
 
-    IF lv_err_step2 = abap_true.
-       " Nếu lỗi Update giá -> Rollback phần giá, nhưng SO đã tạo ở Bước 1 vẫn còn
-       " Tùy nghiệp vụ: Có thể để nguyên SO giá 0 hoặc xóa SO.
-       " Ở đây ta chỉ báo lỗi.
-       MESSAGE |SO { lv_vbeln } đã tạo nhưng LỖI cập nhật giá! Vui lòng kiểm tra lại.| TYPE 'W'.
-    ELSE.
-       " Commit lần cuối để lưu giá
-       CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = abap_true.
-
-       " --- THÀNH CÔNG TOÀN DIỆN ---
-       gs_so_heder_ui-so_hdr_vbeln = lv_vbeln.
-       " ... (Tiếp tục logic lưu ZTable và tạo Delivery như cũ) ...
-
-       " Code Save Ztable (Giữ nguyên)
-       IF gt_item_details IS NOT INITIAL.
-          DATA lt_items_to_save TYPE TABLE OF ztb_so_item_sing.
-          FIELD-SYMBOLS <fs_item_alv> LIKE LINE OF gt_item_details.
-          LOOP AT gt_item_details ASSIGNING <fs_item_alv> WHERE matnr IS NOT INITIAL.
-            <fs_item_alv>-req_id = gs_so_heder_ui-req_id.
-            <fs_item_alv>-sales_order = lv_vbeln.
-            <fs_item_alv>-proc_status = 'P'.
-            APPEND CORRESPONDING #( <fs_item_alv> ) TO lt_items_to_save.
-          ENDLOOP.
-          IF lt_items_to_save IS NOT INITIAL.
-            MODIFY ztb_so_item_sing FROM TABLE @lt_items_to_save. COMMIT WORK.
-          ENDIF.
-       ENDIF.
-
-       " Code tạo Delivery (Giữ nguyên)
-       DATA: ls_temp_header_for_deliv TYPE ty_header.
-       ls_temp_header_for_deliv-req_id        = gs_so_heder_ui-req_id.
-       ls_temp_header_for_deliv-temp_id       = gs_so_heder_ui-temp_id.
-       ls_temp_header_for_deliv-VBELN_SO   = lv_vbeln.
-       ls_temp_header_for_deliv-sales_org     = gs_so_heder_ui-so_hdr_vkorg.
-       ls_temp_header_for_deliv-sales_channel = gs_so_heder_ui-so_hdr_vtweg.
-       ls_temp_header_for_deliv-sales_div     = gs_so_heder_ui-so_hdr_spart.
-       ls_temp_header_for_deliv-sold_to_party = gs_so_heder_ui-so_hdr_sold_addr.
-       ls_temp_header_for_deliv-cust_ref      = gs_so_heder_ui-so_hdr_bstnk.
-
-       IF lt_item_in IS NOT INITIAL.
-         PERFORM perform_auto_delivery USING lv_vbeln CHANGING ls_temp_header_for_deliv.
-       ELSE.
-         ls_temp_header_for_deliv-message = |SO { lv_vbeln } created (no items).|.
-       ENDIF.
-
-       gs_so_heder_ui-so_hdr_message = ls_temp_header_for_deliv-message.
-       IF gs_so_heder_ui-so_hdr_message IS INITIAL.
-         gs_so_heder_ui-so_hdr_message = |Sales Order { lv_vbeln } created successfully.|.
-       ENDIF.
-       MESSAGE gs_so_heder_ui-so_hdr_message TYPE 'S'.
-
-       gv_so_just_created = abap_true.
-       PERFORM reset_single_entry_screen.
+    IF lv_err_step2 = abap_false.
+       CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = 'X'.
     ENDIF.
-
   ENDIF.
 
+  " ========================================================================
+  " [PHẦN 6] KẾT THÚC & HẬU XỬ LÝ
+  " ========================================================================
+  gs_so_heder_ui-so_hdr_vbeln = lv_salesdocument_ex.
+  gs_so_heder_ui-so_hdr_message = |Sales Order { lv_salesdocument_ex } created successfully.|.
+  MESSAGE gs_so_heder_ui-so_hdr_message TYPE 'S'.
+
+  " 1. Lưu ZTable
+  IF gt_item_details IS NOT INITIAL.
+      DATA lt_items_to_save TYPE TABLE OF ztb_so_item_sing.
+      FIELD-SYMBOLS <fs_item_alv> LIKE LINE OF gt_item_details.
+      LOOP AT gt_item_details ASSIGNING <fs_item_alv> WHERE matnr IS NOT INITIAL.
+        <fs_item_alv>-req_id = gs_so_heder_ui-req_id.
+        <fs_item_alv>-sales_order = lv_salesdocument_ex.
+        <fs_item_alv>-proc_status = 'P'.
+        APPEND CORRESPONDING #( <fs_item_alv> ) TO lt_items_to_save.
+      ENDLOOP.
+      IF lt_items_to_save IS NOT INITIAL.
+         MODIFY ztb_so_item_sing FROM TABLE @lt_items_to_save. COMMIT WORK.
+      ENDIF.
+  ENDIF.
+
+  " 2. Auto Delivery
+  IF lv_vbtyp = 'C' OR lv_vbtyp = 'H' OR lv_vbtyp = 'I'.
+      DATA: ls_temp_header_for_deliv TYPE ty_header.
+      ls_temp_header_for_deliv-vbeln_so       = lv_salesdocument_ex.
+      ls_temp_header_for_deliv-sales_org      = gs_so_heder_ui-so_hdr_vkorg.
+      ls_temp_header_for_deliv-sales_channel  = gs_so_heder_ui-so_hdr_vtweg.
+      ls_temp_header_for_deliv-sales_div      = gs_so_heder_ui-so_hdr_spart.
+      ls_temp_header_for_deliv-sold_to_party  = gs_so_heder_ui-so_hdr_sold_addr.
+      ls_temp_header_for_deliv-cust_ref       = gs_so_heder_ui-so_hdr_bstnk.
+
+      PERFORM perform_auto_delivery USING lv_salesdocument_ex CHANGING ls_temp_header_for_deliv.
+
+      IF ls_temp_header_for_deliv-message IS NOT INITIAL.
+         MESSAGE ls_temp_header_for_deliv-message TYPE 'S'.
+      ENDIF.
+  ENDIF.
+
+  " 3. Reset Screen
+  gv_so_just_created = abap_true.
+  PERFORM reset_single_entry_screen.
+
 ENDFORM.
-*&---------------------------------------------------------------------*
-*& Form PERFORM_CREATE_SINGLE_SO
-*&---------------------------------------------------------------------*
-*FORM perform_create_single_so.
-*
-*   1. Khai báo biến cho BAPI
-*  DATA: ls_header_in      TYPE bapisdhd1,
-*        ls_header_inx     TYPE bapisdhd1x,
-*        lt_items_in       TYPE TABLE OF bapisditm,
-*        lt_items_inx      TYPE TABLE OF bapisditmx,
-*        lt_partners       TYPE TABLE OF bapiparnr,
-*        lt_schedules_in   TYPE TABLE OF bapischdl,
-*        lt_schedules_inx  TYPE TABLE OF bapischdlx,
-*        lt_conditions_in  TYPE TABLE OF bapicond,   " Quan trọng
-*        lt_conditions_inx TYPE TABLE OF bapicondx,  " Quan trọng
-*        lt_return         TYPE TABLE OF bapiret2,
-*        lv_salesdocument  TYPE vbak-vbeln.
-*
-*  DATA: lv_item_no TYPE posnr_va.
-*
-*   --- 2. CHUẨN BỊ HEADER ---
-*  ls_header_in-doc_type   = gs_so_heder_ui-so_hdr_auart.
-*  ls_header_in-sales_org  = gs_so_heder_ui-so_hdr_vkorg.
-*  ls_header_in-distr_chan = gs_so_heder_ui-so_hdr_vtweg.
-*  ls_header_in-division   = gs_so_heder_ui-so_hdr_spart.
-*  ls_header_in-req_date_h = gs_so_heder_ui-so_hdr_ketdat. " Ngày giao hàng
-*
-*  ls_header_inx-doc_type   = 'X'.
-*  ls_header_inx-sales_org  = 'X'.
-*  ls_header_inx-distr_chan = 'X'.
-*  ls_header_inx-division   = 'X'.
-*  ls_header_inx-req_date_h = 'X'.
-*  ls_header_inx-updateflag = 'I'. " Insert
-*
-*   --- 3. CHUẨN BỊ PARTNER (Sold-to) ---
-*  APPEND VALUE #( partn_role = 'AG' partn_numb = gs_so_heder_ui-so_hdr_sold_addr ) TO lt_partners.
-*
-*   --- 4. CHUẨN BỊ ITEMS & CONDITIONS ---
-*   Duyệt qua bảng Item Details (dữ liệu chính)
-*  LOOP AT gt_item_details ASSIGNING FIELD-SYMBOL(<fs_item>).
-*    lv_item_no = <fs_item>-item_no.
-*    IF lv_item_no IS INITIAL. lv_item_no = sy-tabix * 10. ENDIF. " Tự sinh số nếu thiếu
-*
-*     A. Map Item Data
-*    APPEND VALUE #(
-*      itm_number = lv_item_no
-*      material   = <fs_item>-matnr
-*      plant      = <fs_item>-plant
-*      target_qty = <fs_item>-quantity
-*      target_qu  = <fs_item>-unit
-*    ) TO lt_items_in.
-*
-*    APPEND VALUE #(
-*      itm_number = lv_item_no
-*      material   = 'X'
-*      plant      = 'X'
-*      target_qty = 'X'
-*      target_qu  = 'X'
-*      updateflag = 'I'
-*    ) TO lt_items_inx.
-*
-*     B. Map Condition (Giá) - Lấy từ bảng Condition ALV
-*     Đây là phần KHÁC BIỆT quan trọng. Bạn cần lấy giá từ bảng gt_conditions_alv
-*     tương ứng với Item này.
-*    LOOP AT gt_conditions_alv ASSIGNING FIELD-SYMBOL(<fs_cond>)
-*                              WHERE item_no = lv_item_no       " Khớp theo Item No
-*                                AND amount  IS NOT INITIAL.    " Chỉ lấy dòng có tiền
-*
-*      APPEND VALUE #(
-*        itm_number = lv_item_no
-*        cond_type  = <fs_cond>-kschl   " Ví dụ: PR00
-*        cond_value = <fs_cond>-amount  " Ví dụ: 100000
-*        currency   = <fs_cond>-waers   " Ví dụ: VND
-*      ) TO lt_conditions_in.
-*
-*      APPEND VALUE #(
-*        itm_number = lv_item_no
-*        cond_type  = <fs_cond>-kschl
-*        cond_value = 'X'
-*        currency   = 'X'
-*        updateflag = 'I'
-*      ) TO lt_conditions_inx.
-*    ENDLOOP.
-*
-*     (Fallback) Nếu trong gt_conditions_alv không có, thử lấy từ gt_item_details
-*     Dành cho trường hợp nhập nhanh trên grid Item mà không mở tab Condition
-*    IF sy-subrc <> 0 AND <fs_item>-unit_price IS NOT INITIAL.
-*       APPEND VALUE #(
-*        itm_number = lv_item_no
-*        cond_type  = 'PR00'              " Mặc định PR00 nếu nhập nhanh
-*        cond_value = <fs_item>-unit_price
-*        currency   = <fs_item>-currency
-*      ) TO lt_conditions_in.
-*
-*      APPEND VALUE #(
-*        itm_number = lv_item_no
-*        cond_type  = 'PR00'
-*        cond_value = 'X'
-*        currency   = 'X'
-*        updateflag = 'I'
-*      ) TO lt_conditions_inx.
-*    ENDIF.
-*
-*  ENDLOOP.
-*
-*   --- 5. GỌI BAPI ---
-*  CALL FUNCTION 'BAPI_SALESORDER_CREATEFROMDAT2'
-*    EXPORTING
-*      order_header_in      = ls_header_in
-*      order_header_inx     = ls_header_inx
-*    IMPORTING
-*      salesdocument        = lv_salesdocument
-*    TABLES
-*      return               = lt_return
-*      order_items_in       = lt_items_in
-*      order_items_inx      = lt_items_inx
-*      order_partners       = lt_partners
-*      order_conditions_in  = lt_conditions_in   " <--- Đừng quên
-*      order_conditions_inx = lt_conditions_inx. " <--- Đừng quên
-*
-*   --- 6. XỬ LÝ KẾT QUẢ ---
-*  IF lv_salesdocument IS NOT INITIAL.
-*    CALL FUNCTION 'BAPI_TRANSACTION_COMMIT' EXPORTING wait = 'X'.
-*    MESSAGE |Sales Order { lv_salesdocument } created successfully.| TYPE 'S'.
-*
-*     Reset màn hình hoặc chuyển trang
-*    gv_so_just_created = abap_true.
-*    CLEAR: gt_item_details, gt_conditions_alv. " Xóa data cũ
-*  ELSE.
-*    CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
-*     Hiển thị lỗi BAPI
-*    LOOP AT lt_return INTO DATA(ls_ret) WHERE type = 'E' OR type = 'A'.
-*      MESSAGE ID ls_ret-id TYPE 'S' NUMBER ls_ret-number
-*              WITH ls_ret-message_v1 ls_ret-message_v2 ls_ret-message_v3 ls_ret-message_v4
-*              DISPLAY LIKE 'E'.
-*      EXIT. " Chỉ hiện lỗi đầu tiên
-*    ENDLOOP.
-*  ENDIF.
-*
-*ENDFORM.
 
 *&---------------------------------------------------------------------*
 *& Form RESET_SINGLE_ENTRY_SCREEN
@@ -4933,16 +4440,16 @@ FORM reset_single_entry_screen.
          gs_so_heder_ui-so_hdr_audat, " Sẽ được PBO default lại
          gs_so_heder_ui-so_hdr_sold_addr,
          gs_so_heder_ui-so_hdr_bstnk,
-         gs_so_heder_ui-SO_HDR_KALSM,
+         gs_so_heder_ui-so_hdr_kalsm,
          gs_so_heder_ui-so_hdr_waerk,
          gs_so_heder_ui-so_hdr_zterm,
          gs_so_heder_ui-so_hdr_inco1,
-         gs_so_heder_ui-SO_HDR_MESSAGE.
+         gs_so_heder_ui-so_hdr_message.
 
   " Xóa Item ALV
   REFRESH gt_item_details.
 
- " --- SỬA LỖI: Hủy CẢ Handler VÀ Grid ---
+  " --- SỬA LỖI: Hủy CẢ Handler VÀ Grid ---
   IF go_event_handler_single IS BOUND.
     FREE go_event_handler_single. " Hủy handler
   ENDIF.
@@ -5166,20 +4673,21 @@ FORM auto_fill_on_data_changed
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form PERFORM_SINGLE_ITEM_SIMULATE (Sửa lỗi Type BAPISDHEDU)
-*&---------------------------------------------------------------------*
-FORM perform_single_item_simulate. " <<< ĐÃ XÓA 'USING ir_data_changed...'
+"chú ý 2
+FORM perform_single_item_simulate.
 
-  " === 1. Khai báo (ĐÃ SỬA LẠI CHO ĐÚNG BAPI) ===
+  " === 1. Khai báo biến ===
   DATA: ls_header_in  TYPE bapisdhead,
         lt_item_in    TYPE TABLE OF bapiitemin,
         lt_partner_in TYPE TABLE OF bapipartnr,
         lt_sched_in   TYPE TABLE OF bapischdl.
 
-  " Các bảng OUTPUT (Sửa lại cho đúng tên)
+  " [THÊM MỚI] Khai báo biến dùng chung để tránh lỗi 'already declared'
+  DATA: lv_base_new TYPE kwert.
+
+  " Các bảng Output
   DATA: lt_item_out        TYPE TABLE OF bapiitemex,
-        lt_sched_out       TYPE TABLE OF bapisdhedu,  " <<< SỬA LỖI: ĐÚNG LÀ BAPISDHEDU
+        lt_sched_out       TYPE TABLE OF bapisdhedu,
         lt_cond_out        TYPE TABLE OF bapicond,
         lt_return          TYPE TABLE OF bapiret2,
         lt_incomplete      TYPE TABLE OF bapiincomp,
@@ -5187,47 +4695,65 @@ FORM perform_single_item_simulate. " <<< ĐÃ XÓA 'USING ir_data_changed...'
 
   FIELD-SYMBOLS: <fs_item>      LIKE LINE OF gt_item_details,
                  <fs_item_out>  LIKE LINE OF lt_item_out,
-                 <fs_sched_out> LIKE LINE OF lt_sched_out, " (Giờ đã là kiểu BAPISDHEDU)
+                 <fs_sched_out> LIKE LINE OF lt_sched_out,
                  <fs_cond_out>  LIKE LINE OF lt_cond_out.
 
-  " --- 2. Chuẩn bị Header & Item BAPI ---
+  " === 2. Chuẩn bị Header & Partner ===
   ls_header_in-doc_type   = gs_so_heder_ui-so_hdr_auart.
   ls_header_in-sales_org  = gs_so_heder_ui-so_hdr_vkorg.
   ls_header_in-distr_chan = gs_so_heder_ui-so_hdr_vtweg.
   ls_header_in-division   = gs_so_heder_ui-so_hdr_spart.
+
+  IF gs_so_heder_ui-so_hdr_prsdt IS NOT INITIAL.
+     ls_header_in-price_date = gs_so_heder_ui-so_hdr_prsdt.
+  ENDIF.
+
   DATA(lv_sold_to) = gs_so_heder_ui-so_hdr_sold_addr.
   CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_sold_to IMPORTING output = lv_sold_to.
   APPEND VALUE #( partn_role = 'AG' partn_numb = lv_sold_to ) TO lt_partner_in.
   APPEND VALUE #( partn_role = 'WE' partn_numb = lv_sold_to ) TO lt_partner_in.
 
+  " === 3. Chuẩn bị Item & Schedule Line ===
   LOOP AT gt_item_details ASSIGNING <fs_item>.
     IF <fs_item>-matnr IS INITIAL. CONTINUE. ENDIF.
+
     DATA(lv_posnr) = sy-tabix * 10.
     DATA(lv_matnr_bapi) = <fs_item>-matnr.
-
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_matnr_bapi IMPORTING output = lv_matnr_bapi.
 
-    APPEND VALUE #( itm_number = lv_posnr
-                    material   = lv_matnr_bapi
-                    plant      = <fs_item>-plant
-                    store_loc  = <fs_item>-store_loc
-                  ) TO lt_item_in.
+    DATA(ls_item_bapi) = VALUE bapiitemin(
+                           itm_number = lv_posnr
+                           material   = lv_matnr_bapi
+                           plant      = <fs_item>-plant
+                           store_loc  = <fs_item>-store_loc ).
 
-    DATA lv_sched_date TYPE dats.
-    IF <fs_item>-req_date IS NOT INITIAL AND <fs_item>-req_date <> '00000000'.
-      lv_sched_date = <fs_item>-req_date.
-    ELSE.
-      lv_sched_date = gs_so_heder_ui-so_hdr_ketdat.
+    " [PHÂN LOẠI 1]: ZDR/ZCRR dùng Target Qty, còn lại dùng Schedule Line
+    IF gs_so_heder_ui-so_hdr_auart = 'ZDR' OR gs_so_heder_ui-so_hdr_auart = 'ZCRR'.
+
+       ls_item_bapi-target_qty = <fs_item>-quantity.
+       ls_item_bapi-target_qu  = <fs_item>-unit.
+       APPEND ls_item_bapi TO lt_item_in.
+
+    ELSE. " ZORR, ZTP, ZRET, ZSC
+
+       APPEND ls_item_bapi TO lt_item_in.
+
+       DATA lv_sched_date TYPE dats.
+       IF <fs_item>-req_date IS NOT INITIAL AND <fs_item>-req_date <> '00000000'.
+          lv_sched_date = <fs_item>-req_date.
+       ELSE.
+          lv_sched_date = gs_so_heder_ui-so_hdr_ketdat.
+       ENDIF.
+
+       APPEND VALUE #( itm_number = lv_posnr
+                       req_qty    = <fs_item>-quantity
+                       req_date   = lv_sched_date ) TO lt_sched_in.
     ENDIF.
-
-    APPEND VALUE #( itm_number = lv_posnr
-                    req_qty    = <fs_item>-quantity
-                    req_date   = lv_sched_date
-                  ) TO lt_sched_in.
   ENDLOOP.
+
   IF lt_item_in IS INITIAL. RETURN. ENDIF.
 
-  " --- 3. Gọi BAPI SIMULATE (Đã sửa) ---
+  " === 4. Gọi BAPI SIMULATE ===
   CALL FUNCTION 'BAPI_SALESORDER_SIMULATE'
     EXPORTING
       order_header_in    = ls_header_in
@@ -5236,51 +4762,259 @@ FORM perform_single_item_simulate. " <<< ĐÃ XÓA 'USING ir_data_changed...'
       order_partners     = lt_partner_in
       order_schedule_in  = lt_sched_in
       order_items_out    = lt_item_out
-      order_schedule_ex  = lt_sched_out   " (Tên đúng là ORDER_SCHEDULE_EX)
-      order_condition_ex = lt_cond_out    " (Tên đúng là ORDER_CONDITION_EX)
+      order_schedule_ex  = lt_sched_out
+      order_condition_ex = lt_cond_out
       order_incomplete   = lt_incomplete
       messagetable       = lt_return.
 
-  " --- 4. Cập nhật BẢNG NỘI BỘ ALV ---
+  " === 5. Cập nhật dữ liệu trả về vào BẢNG NỘI BỘ ALV ===
   LOOP AT gt_item_details ASSIGNING <fs_item>.
     lv_posnr = sy-tabix * 10.
+
     READ TABLE lt_item_out ASSIGNING <fs_item_out> WITH KEY itm_number = lv_posnr.
-    IF sy-subrc <> 0.
-      CLEAR: <fs_item>-description, <fs_item>-itca,
-             <fs_item>-ship_point, <fs_item>-currency,
-             <fs_item>-conf_qty, <fs_item>-net_price, <fs_item>-net_value,
-             <fs_item>-tax.
-      CONTINUE.
+    IF sy-subrc = 0.
+       <fs_item>-item_no     = <fs_item_out>-itm_number.
+       <fs_item>-description = <fs_item_out>-short_text.
+       <fs_item>-itca        = <fs_item_out>-item_categ.
+       <fs_item>-currency    = gs_so_heder_ui-so_hdr_waerk.
+       <fs_item>-plant       = <fs_item_out>-plant.
+       <fs_item>-unit        = <fs_item_out>-sales_unit.
+       <fs_item>-net_value   = <fs_item_out>-net_value.
+       <fs_item>-tax         = <fs_item_out>-net_value1.
+
+       IF <fs_item>-quantity IS NOT INITIAL AND <fs_item>-quantity <> 0.
+          <fs_item>-net_price  = <fs_item>-net_value / <fs_item>-quantity.
+          <fs_item>-unit_price = <fs_item>-net_price.
+       ENDIF.
+
+       " [PHÂN LOẠI 2]: Lấy Confirmed Qty
+       IF gs_so_heder_ui-so_hdr_auart = 'ZDR' OR gs_so_heder_ui-so_hdr_auart = 'ZCRR'.
+          <fs_item>-conf_qty = <fs_item_out>-target_qty.
+       ENDIF.
     ENDIF.
 
-    <fs_item>-item_no     = <fs_item_out>-itm_number.
-    <fs_item>-description = <fs_item_out>-short_text.
-    <fs_item>-itca        = <fs_item_out>-item_categ.
-    <fs_item>-currency    = gs_so_heder_ui-so_hdr_waerk.
-    <fs_item>-plant       = <fs_item_out>-plant.       " <<< THÊM MỚI (Sửa lỗi Plant)
-    <fs_item>-unit        = <fs_item_out>-sales_unit.  " <<< THÊM MỚI (Sửa lỗi Sales Unit)
-*    <fs_item>-net_price   = <fs_item_out>-net_price.  " Gán Net Price
-*    <fs_item>-unit_price  = <fs_item_out>-net_price.  " Gán Net Price vào cột "Amount"
-*    <fs_item>-net_value   = <fs_item_out>-net_value.
-*    <fs_item>-tax         = <fs_item_out>-tax_val.    " <<< Lấy thuế
-*    <fs_item>-per         = <fs_item_out>-cond_p_unt. " <<< Lấy "Per"
-
-    " <<< SỬA: Đọc từ BAPISDHEDU (Tên trường khác) >>>
-    READ TABLE lt_sched_out ASSIGNING <fs_sched_out> WITH KEY itm_number = lv_posnr.
-    IF sy-subrc = 0.
-      <fs_item>-conf_qty = <fs_sched_out>-req_qty. " <<< SỬA: Tên trường là SCHED_QTY
-      IF <fs_item>-req_date IS INITIAL OR <fs_item>-req_date = '00000000'.
-        <fs_item>-req_date = <fs_sched_out>-req_date. " <<< SỬA: Tên trường là DELIV_DATE
-      ENDIF.
+    IF gs_so_heder_ui-so_hdr_auart <> 'ZDR' AND gs_so_heder_ui-so_hdr_auart <> 'ZCRR'.
+       READ TABLE lt_sched_out ASSIGNING <fs_sched_out> WITH KEY itm_number = lv_posnr.
+       IF sy-subrc = 0.
+          <fs_item>-conf_qty = <fs_sched_out>-req_qty.
+          IF <fs_item>-req_date IS INITIAL OR <fs_item>-req_date = '00000000'.
+             <fs_item>-req_date = <fs_sched_out>-req_date.
+          ENDIF.
+       ENDIF.
     ENDIF.
 
     LOOP AT lt_cond_out ASSIGNING <fs_cond_out> WHERE itm_number = lv_posnr.
-      <fs_item>-cond_type  = <fs_cond_out>-cond_type.  " Gán tên 'ZPT0'
+      <fs_item>-cond_type = <fs_cond_out>-cond_type.
+      IF <fs_cond_out>-condclass = 'B'.
+         <fs_item>-per = <fs_cond_out>-cond_p_unt.
+      ENDIF.
     ENDLOOP.
-
   ENDLOOP.
 
-  " --- 5. Tính tổng và cập nhật 2 TRƯỜNG HEADER (Giữ nguyên) ---
+  " === 6. CẬP NHẬT CACHE (TÍNH LẠI GIÁ TRỊ KHI ĐỔI SỐ LƯỢNG) ===
+  FIELD-SYMBOLS: <fs_cache> TYPE ty_cond_cache,
+                 <fs_cond>  TYPE ty_cond_alv.
+  DATA: lv_new_qty   TYPE zquantity,
+        lv_order_val TYPE kwert,
+        lv_z100_val  TYPE kwert,
+        lv_zdrp_pct  TYPE kbetr,
+        lv_tax_pct   TYPE kbetr.
+
+  LOOP AT gt_item_details ASSIGNING <fs_item>.
+     lv_new_qty = <fs_item>-quantity.
+     IF lv_new_qty <= 0. lv_new_qty = 1. ENDIF.
+
+     READ TABLE gt_cond_cache ASSIGNING <fs_cache> WITH TABLE KEY item_no = <fs_item>-item_no.
+     IF sy-subrc = 0.
+
+        " --- A. CASE ZDR & ZCRR (Debit/Credit Memo) ---
+        IF gs_so_heder_ui-so_hdr_auart = 'ZDR'.
+
+           " 1. Tính lại ZPRQ
+           LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond> WHERE kschl = 'ZPRQ'.
+              <fs_cond>-kwert = <fs_cond>-amount * lv_new_qty.
+              lv_order_val    = <fs_cond>-kwert.
+           ENDLOOP.
+
+           " 2. Lấy % ZDRP
+           lv_zdrp_pct = 0.
+           READ TABLE <fs_cache>-conditions INTO DATA(ls_zdrp) WITH KEY kschl = 'ZDRP'.
+           IF sy-subrc = 0. lv_zdrp_pct = ls_zdrp-amount. ENDIF.
+
+           " 3. Tính toán các dòng ăn theo
+           LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond>.
+              CASE <fs_cond>-kschl.
+                 WHEN 'ZDRP'. <fs_cond>-kwert = ( lv_order_val * <fs_cond>-amount ) / 100.
+                 WHEN 'Z100'. <fs_cond>-kwert = ( lv_order_val * <fs_cond>-amount ) / 100.
+                              lv_z100_val     = <fs_cond>-kwert.
+                 WHEN 'NETW'. <fs_cond>-kwert = lv_order_val + ( ( lv_order_val * lv_zdrp_pct ) / 100 ) + lv_z100_val.
+                              <fs_cond>-amount = <fs_cond>-kwert / lv_new_qty.
+              ENDCASE.
+              IF <fs_cond>-vtext = 'Order Value'. <fs_cond>-kwert = lv_order_val. ENDIF.
+           ENDLOOP.
+
+        " --- B. CASE CÁC LOẠI CÒN LẠI (ZORR, ZTP, ZRET, ZSC) ---
+        " --- [MỚI] B. CASE ZCRR (Credit) ---
+        " --- B. CASE ZCRR (Credit Memo) ---
+        ELSEIF gs_so_heder_ui-so_hdr_auart = 'ZCRR'.
+
+           " 1. Tính lại Base (DẤU ÂM)
+           lv_base_new = 0.
+           LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond> WHERE kschl = 'ZPRQ'.
+              <fs_cond>-kwert = ( <fs_cond>-amount * lv_new_qty ) * -1. " Nhân -1 ở đây
+              lv_base_new     = <fs_cond>-kwert.
+           ENDLOOP.
+
+           " 2. Lấy % ZCRP
+           DATA: lv_zcrp_p TYPE kbetr. lv_zcrp_p = 0.
+           READ TABLE <fs_cache>-conditions INTO DATA(ls_zc) WITH KEY kschl = 'ZCRP'.
+           IF sy-subrc = 0. lv_zcrp_p = ls_zc-amount. ENDIF.
+
+           " 3. Tính toán lại (Logic âm)
+           DATA: val_zcrp TYPE kwert, val_net1 TYPE kwert,
+                 val_z100 TYPE kwert, val_net2 TYPE kwert.
+
+           val_zcrp = ( lv_base_new * lv_zcrp_p ) / 100.
+           val_net1 = lv_base_new + val_zcrp.
+           val_z100 = ( lv_base_new * -100 ) / 100.
+           val_net2 = val_net1 + val_z100.
+
+           " 4. Update Cache
+           LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond>.
+              CASE <fs_cond>-kschl.
+                 WHEN 'NETW'. <fs_cond>-kwert = lv_base_new.
+                 WHEN 'ZCRP'. <fs_cond>-kwert = val_zcrp.
+                 WHEN 'NET1'. <fs_cond>-kwert = val_net1.
+                 WHEN 'Z100'. <fs_cond>-kwert = val_z100.
+                 WHEN 'NET2'. <fs_cond>-kwert = val_net2.
+              ENDCASE.
+
+              " Tính Unit Price (Dương)
+              IF lv_new_qty <> 0.
+                 IF <fs_cond>-kschl = 'NETW' OR <fs_cond>-kschl = 'NET1' OR
+                    <fs_cond>-kschl = 'NET2' OR <fs_cond>-kschl = 'GROS'.
+                    <fs_cond>-amount = abs( <fs_cond>-kwert / lv_new_qty ).
+                 ENDIF.
+              ELSE.
+                 IF <fs_cond>-kschl = 'NETW' OR <fs_cond>-kschl = 'NET1' OR
+                    <fs_cond>-kschl = 'NET2' OR <fs_cond>-kschl = 'GROS'.
+                    <fs_cond>-amount = 0.
+                 ENDIF.
+              ENDIF.
+           ENDLOOP.
+
+           " --- C. CÁC LOẠI KHÁC (ZORR...) ---
+        ELSE.
+
+           " >>> RIÊNG ZSC: Logic phức tạp (Base -> Net1 -> Net2) <<<
+           IF gs_so_heder_ui-so_hdr_auart = 'ZSC'.
+
+              " 1. Tính Base (ZPRQ)
+              lv_base_new = 0.
+              LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond> WHERE kschl = 'ZPRQ'.
+                 <fs_cond>-kwert = <fs_cond>-amount * lv_new_qty.
+                 lv_base_new     = <fs_cond>-kwert.
+              ENDLOOP.
+
+              " 2. Lấy % ZCF1 và ZTAX
+              DATA: lv_zcf1_p TYPE kbetr, lv_tax_p TYPE kbetr.
+              lv_zcf1_p = 20. lv_tax_p = 8. " Default
+              READ TABLE <fs_cache>-conditions INTO DATA(ls_c1) WITH KEY kschl = 'ZCF1'.
+              IF sy-subrc = 0. lv_zcf1_p = ls_c1-amount. ENDIF.
+              READ TABLE <fs_cache>-conditions INTO DATA(ls_t1) WITH KEY kschl = 'ZTAX'.
+              IF sy-subrc = 0. lv_tax_p = ls_t1-amount. ENDIF.
+
+              " 3. Tính toán trung gian
+              DATA: v_zcf1 TYPE kwert, v_net1 TYPE kwert, v_z100 TYPE kwert, v_net2 TYPE kwert, v_tax TYPE kwert.
+              v_zcf1 = ( lv_base_new * lv_zcf1_p ) / 100.
+              v_net1 = lv_base_new + v_zcf1.
+              v_z100 = ( lv_base_new * -100 ) / 100.
+              v_net2 = v_net1 + v_z100.
+              v_tax  = ( v_net2 * lv_tax_p ) / 100.
+
+              " 4. Update Cache
+              LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond>.
+                 CASE <fs_cond>-kschl.
+                    WHEN 'NETW'. <fs_cond>-kwert = lv_base_new.
+                    WHEN 'ZCF1'. <fs_cond>-kwert = v_zcf1.
+                    WHEN 'NET1'. <fs_cond>-kwert = v_net1.
+                    WHEN 'Z100'. <fs_cond>-kwert = v_z100.
+                    WHEN 'NET2'. <fs_cond>-kwert = v_net2.
+                    WHEN 'ZTAX'. <fs_cond>-kwert = v_tax.
+                    WHEN 'GROS'. <fs_cond>-kwert = v_net2 + v_tax.
+                 ENDCASE.
+
+                 " Tính lại Amount cho các dòng tổng
+                 IF lv_new_qty <> 0.
+                    IF <fs_cond>-kschl = 'NETW' OR <fs_cond>-kschl = 'NET1' OR
+                       <fs_cond>-kschl = 'NET2' OR <fs_cond>-kschl = 'GROS'.
+                       <fs_cond>-amount = <fs_cond>-kwert / lv_new_qty.
+                    ENDIF.
+                 ENDIF.
+              ENDLOOP.
+
+           ENDIF.
+
+              " >>> [MỚI] LOGIC RIÊNG CHO ZFOC
+        IF gs_so_heder_ui-so_hdr_auart = 'ZFOC'.
+
+           " 1. Tính lại Base (NETW)
+           DATA(lv_net_new) = 0.
+           LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond> WHERE kschl = 'NETW'.
+              <fs_cond>-kwert = <fs_cond>-amount * lv_new_qty.
+              lv_net_new      = <fs_cond>-kwert.
+           ENDLOOP.
+
+           " 2. Tính Z100 và Net1
+           DATA: v_z100_foc TYPE kwert, v_net1_foc TYPE kwert.
+           v_z100_foc = ( lv_net_new * -100 ) / 100.
+           v_net1_foc = lv_net_new + v_z100_foc.
+
+           " 3. Update Cache
+           LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond>.
+              CASE <fs_cond>-kschl.
+                 WHEN 'Z100'. <fs_cond>-kwert = v_z100_foc.
+                 WHEN 'NET1'. <fs_cond>-kwert = v_net1_foc.
+                              IF lv_new_qty <> 0. <fs_cond>-amount = v_net1_foc / lv_new_qty. ENDIF.
+              ENDCASE.
+           ENDLOOP.
+
+           " >>> CÁC LOẠI STANDARD: ZORR, ZTP, ZRET (Logic chuẩn: Base -> Net -> Tax -> Gross) <<<
+           ELSE.
+
+              " 1. Tính Base
+              lv_order_val = 0.
+              LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond> WHERE kschl = 'ZPRQ'.
+                 <fs_cond>-kwert = <fs_cond>-amount * lv_new_qty.
+                 lv_order_val    = <fs_cond>-kwert.
+              ENDLOOP.
+
+              " 2. Lấy % Thuế
+              lv_tax_pct = 0.
+              READ TABLE <fs_cache>-conditions INTO DATA(ls_ztax) WITH KEY kschl = 'ZTAX'.
+              IF sy-subrc = 0. lv_tax_pct = ls_ztax-amount. ENDIF.
+
+              " 3. Tính toán Net -> Tax -> Gross
+              LOOP AT <fs_cache>-conditions ASSIGNING <fs_cond>.
+                 CASE <fs_cond>-kschl.
+                    WHEN 'NETW'.
+                       <fs_cond>-kwert = lv_order_val.
+                       IF lv_new_qty <> 0. <fs_cond>-amount = <fs_cond>-kwert / lv_new_qty.
+                       ELSE. <fs_cond>-amount = 0. ENDIF.
+                    WHEN 'ZTAX'.
+                       <fs_cond>-kwert = ( lv_order_val * lv_tax_pct ) / 100.
+                    WHEN 'GROS'.
+                       <fs_cond>-kwert = lv_order_val + ( ( lv_order_val * lv_tax_pct ) / 100 ).
+                       IF lv_new_qty <> 0. <fs_cond>-amount = <fs_cond>-kwert / lv_new_qty.
+                       ELSE. <fs_cond>-amount = 0. ENDIF.
+                 ENDCASE.
+              ENDLOOP.
+           ENDIF.
+        ENDIF.
+     ENDIF.
+  ENDLOOP.
+
+  " === 7. Tính tổng Header ===
   DATA: lv_total_net TYPE vbap-netwr,
         lv_total_tax TYPE vbap-mwsbp.
   CLEAR: lv_total_net, lv_total_tax.
@@ -5288,11 +5022,10 @@ FORM perform_single_item_simulate. " <<< ĐÃ XÓA 'USING ir_data_changed...'
     lv_total_net = lv_total_net + <fs_item>-net_value.
     lv_total_tax = lv_total_tax + <fs_item>-tax.
   ENDLOOP.
-
   gs_so_heder_ui-so_hdr_total_net = lv_total_net.
   gs_so_heder_ui-so_hdr_total_tax = lv_total_tax.
 
-  " --- 6. Xử lý lỗi (Giữ nguyên) ---
+  " === 8. Thông báo (Luôn hiện) ===
   LOOP AT lt_return ASSIGNING FIELD-SYMBOL(<ret>) WHERE type CA 'AEX'.
     lv_errors_occurred = abap_true.
     MESSAGE <ret>-message TYPE 'S' DISPLAY LIKE 'E'.
@@ -5300,319 +5033,10 @@ FORM perform_single_item_simulate. " <<< ĐÃ XÓA 'USING ir_data_changed...'
   ENDLOOP.
 
   IF lv_errors_occurred = abap_false.
-    MESSAGE 'Item details simulated successfully. Totals updated.' TYPE 'S'.
+    MESSAGE 'Item details simulated successfully.' TYPE 'S'.
   ENDIF.
+
 ENDFORM.
-
-
-***---------------------------------------------------------------------*
-*** Form AUTO_FILL_ON_DATA_CHANGED (Final Version - Single Entry)
-***---------------------------------------------------------------------*
-*** Mô phỏng hành vi VA01 (rút gọn)
-*** - Khi nhập Material: auto Description, Unit, ItemCat, ReqDate, Plant
-*** - Khi nhập Quantity: auto Currency, NetPrice, NetValue, Conf.Qty
-***---------------------------------------------------------------------*
-*FORM auto_fill_on_data_changed
-*  USING ir_data_changed TYPE REF TO cl_alv_changed_data_protocol.
-*
-*  FIELD-SYMBOLS: <ls_modi_cell> LIKE LINE OF ir_data_changed->mt_mod_cells,
-*                 <fs_item>      LIKE LINE OF gt_item_details.
-*
-*  DATA: lv_matnr_internal TYPE matnr,
-*        lv_unit           TYPE meins,
-*        lv_maktx          TYPE maktx,
-*        lv_curr           TYPE waers.
-*
-*  LOOP AT ir_data_changed->mt_mod_cells ASSIGNING <ls_modi_cell>.
-*
-*    "=============================================================
-*    " 🛡️ Check row validity trước khi đọc dòng (tránh dump)
-*    "=============================================================
-*    IF <ls_modi_cell>-row_id > LINES( gt_item_details ) OR <ls_modi_cell>-row_id <= 0.
-*      CONTINUE.
-*    ENDIF.
-*
-*    READ TABLE gt_item_details ASSIGNING <fs_item> INDEX <ls_modi_cell>-row_id.
-*    IF sy-subrc <> 0.
-*      CONTINUE.
-*    ENDIF.
-*
-*    "=============================================================
-*    " CASE 1️⃣: User nhập MATERIAL → auto-fill thông tin cơ bản
-*    "=============================================================
-*    IF <ls_modi_cell>-fieldname = 'MATERIAL'.
-*
-*      "--- 2. Lấy Description (MAKT) ---
-*      SELECT SINGLE maktx
-*        FROM makt
-*        INTO @lv_maktx
-*        WHERE matnr = @lv_matnr_internal
-*          AND spras = @sy-langu.
-*      IF sy-subrc = 0.
-*        <fs_item>-description = lv_maktx.
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'DESCRIPTION'
-*          i_value     = lv_maktx ).
-*      ENDIF.
-*
-*      "--- 3. Lấy Sales Unit (MVKE/MARA) ---
-*      CLEAR lv_unit.
-*      SELECT SINGLE vrkme
-*        FROM mvke
-*        INTO @lv_unit
-*        WHERE matnr = @lv_matnr_internal
-*          AND vkorg = @gs_so_heder_ui-so_hdr_vkorg
-*          AND vtweg = @gs_so_heder_ui-so_hdr_vtweg.
-*      IF sy-subrc <> 0.
-*        SELECT SINGLE meins
-*          FROM mara
-*          INTO @lv_unit
-*          WHERE matnr = @lv_matnr_internal.
-*      ENDIF.
-*      IF lv_unit IS NOT INITIAL.
-*        <fs_item>-unit = lv_unit.
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'UNIT'
-*          i_value     = lv_unit ).
-*      ENDIF.
-*
-*      "--- 4. Gán Item Category mặc định (mô phỏng TAN) ---
-*      IF <fs_item>-itca IS INITIAL.
-*        <fs_item>-itca = 'TAN'.
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'ITCA'
-*          i_value     = 'TAN' ).
-*      ENDIF.
-*
-*      "--- 5. Gán Delivery Date = Req.Deliv.Date từ Header ---
-*      IF <fs_item>-req_date IS INITIAL
-*         AND gs_so_heder_ui-so_hdr_ketdat IS NOT INITIAL.
-*        <fs_item>-req_date = gs_so_heder_ui-so_hdr_ketdat.
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'REQ_DATE'
-*          i_value     = gs_so_heder_ui-so_hdr_ketdat ).
-*      ENDIF.
-*
-*      "--- 6. Gán Plant mặc định (demo, nếu có thể) ---
-*      IF <fs_item>-plant IS INITIAL.
-*        <fs_item>-plant = '1000'. " ← Tạm thời hardcode, sau này có thể derive
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'PLANT'
-*          i_value     = '1000' ).
-*      ENDIF.
-*
-*    ENDIF. " end MATERIAL case
-*
-*
-*    "=============================================================
-*    " CASE 2️⃣: User nhập QUANTITY → auto-fill giá trị định lượng
-*    "=============================================================
-*    IF <ls_modi_cell>-fieldname = 'QUANTITY'.
-*
-*      "--- 1. Gán Confirmed Qty = Quantity ---
-*      IF <fs_item>-quantity IS NOT INITIAL.
-*        <fs_item>-conf_qty = <fs_item>-quantity.
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'CONF_QTY'
-*          i_value     = <fs_item>-conf_qty ).
-*      ENDIF.
-*
-*      "--- 2. Currency lấy từ Header ---
-*      lv_curr = gs_so_heder_ui-so_hdr_waerk.
-*      IF lv_curr IS NOT INITIAL.
-*        <fs_item>-currency = lv_curr.
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'CURRENCY'
-*          i_value     = lv_curr ).
-*      ENDIF.
-*
-*      "--- 3. Net Price / Per (demo: copy Unit Price) ---
-*      IF <fs_item>-unit_price IS NOT INITIAL.
-*        <fs_item>-net_price = <fs_item>-unit_price.
-*        ir_data_changed->modify_cell(
-*          i_row_id    = <ls_modi_cell>-row_id
-*          i_fieldname = 'NET_PRICE'
-*          i_value     = <fs_item>-unit_price ).
-*      ENDIF.
-**
-*
-*    ENDIF. " end QUANTITY case
-*
-*  ENDLOOP.
-*
-*  "=============================================================
-*  " 🔁 Refresh lại ALV sau khi auto-fill
-*  "=============================================================
-*  IF go_grid_item_single IS BOUND.
-*    go_grid_item_single->refresh_table_display( ).
-*  ENDIF.
-*
-*ENDFORM.
-*
-*
-**&---------------------------------------------------------------------*
-**& Form PERFORM_SINGLE_ITEM_SIMULATE (Sửa lỗi Type BAPISDHEDU)
-**&---------------------------------------------------------------------*
-*FORM perform_single_item_simulate. " <<< ĐÃ XÓA 'USING ir_data_changed...'
-*
-*  " === 1. Khai báo (ĐÃ SỬA LẠI CHO ĐÚNG BAPI) ===
-*  DATA: ls_header_in  TYPE bapisdhead,
-*        lt_item_in    TYPE TABLE OF bapiitemin,
-*        lt_partner_in TYPE TABLE OF bapipartnr,
-*        lt_sched_in   TYPE TABLE OF bapischdl.
-*
-*  " Các bảng OUTPUT (Sửa lại cho đúng tên)
-*  DATA: lt_item_out    TYPE TABLE OF bapiitemex,
-*        lt_sched_out   TYPE TABLE OF BAPISDHEDU,  " <<< SỬA LỖI: ĐÚNG LÀ BAPISDHEDU
-*        lt_cond_out    TYPE TABLE OF bapicond,
-*        lt_return      TYPE TABLE OF bapiret2,
-*        lt_incomplete  TYPE TABLE OF bapiincomp,
-*        lv_errors_occurred TYPE abap_bool.
-*
-*  FIELD-SYMBOLS: <fs_item>      LIKE LINE OF gt_item_details,
-*                 <fs_item_out>  LIKE LINE OF lt_item_out,
-*                 <fs_sched_out> LIKE LINE OF lt_sched_out, " (Giờ đã là kiểu BAPISDHEDU)
-*                 <fs_cond_out>  LIKE LINE OF lt_cond_out.
-*
-*  " --- 2. Chuẩn bị Header & Item BAPI ---
-*  ls_header_in-doc_type   = gs_so_heder_ui-so_hdr_auart.
-*  ls_header_in-sales_org  = gs_so_heder_ui-so_hdr_vkorg.
-*  ls_header_in-distr_chan = gs_so_heder_ui-so_hdr_vtweg.
-*  ls_header_in-division   = gs_so_heder_ui-so_hdr_spart.
-*  DATA(lv_sold_to) = gs_so_heder_ui-so_hdr_sold_addr.
-*  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_sold_to IMPORTING output = lv_sold_to.
-*  APPEND VALUE #( partn_role = 'AG' partn_numb = lv_sold_to ) TO lt_partner_in.
-*  APPEND VALUE #( partn_role = 'WE' partn_numb = lv_sold_to ) TO lt_partner_in.
-*
-*  LOOP AT gt_item_details ASSIGNING <fs_item>.
-*    IF <fs_item>-matnr IS INITIAL. CONTINUE. ENDIF.
-*    DATA(lv_posnr) = sy-tabix * 10.
-*    DATA(lv_matnr_bapi) = <fs_item>-matnr.
-*
-*    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_matnr_bapi IMPORTING output = lv_matnr_bapi.
-*
-*    APPEND VALUE #( itm_number = lv_posnr
-*                    material   = lv_matnr_bapi
-*                    plant      = <fs_item>-plant
-*                    store_loc  = <fs_item>-store_loc
-*                  ) TO lt_item_in.
-*
-*    DATA lv_sched_date TYPE dats.
-*    IF <fs_item>-req_date IS NOT INITIAL AND <fs_item>-req_date <> '00000000'.
-*      lv_sched_date = <fs_item>-req_date.
-*    ELSE.
-*      lv_sched_date = gs_so_heder_ui-so_hdr_ketdat.
-*    ENDIF.
-*
-*    APPEND VALUE #( itm_number = lv_posnr
-*                    req_qty    = <fs_item>-quantity
-*                    req_date   = lv_sched_date
-*                  ) TO lt_sched_in.
-*  ENDLOOP.
-*  IF lt_item_in IS INITIAL. RETURN. ENDIF.
-*
-*  " --- 3. Gọi BAPI SIMULATE (Đã sửa) ---
-*  CALL FUNCTION 'BAPI_SALESORDER_SIMULATE'
-*    EXPORTING
-*      order_header_in    = ls_header_in
-*    TABLES
-*      order_items_in     = lt_item_in
-*      order_partners     = lt_partner_in
-*      order_schedule_in = lt_sched_in
-*      order_items_out    = lt_item_out
-*      order_schedule_ex  = lt_sched_out   " (Tên đúng là ORDER_SCHEDULE_EX)
-*      order_condition_ex = lt_cond_out    " (Tên đúng là ORDER_CONDITION_EX)
-*      order_incomplete   = lt_incomplete
-*      messagetable       = lt_return.
-*
-*  " --- 4. Cập nhật BẢNG NỘI BỘ ALV ---
-*  LOOP AT gt_item_details ASSIGNING <fs_item>.
-*    lv_posnr = sy-tabix * 10.
-*    READ TABLE lt_item_out ASSIGNING <fs_item_out> WITH KEY itm_number = lv_posnr.
-*    IF sy-subrc <> 0.
-*      CLEAR: <fs_item>-description, <fs_item>-itca,
-*             <fs_item>-ship_point, <fs_item>-currency,
-*             <fs_item>-conf_qty, <fs_item>-net_price, <fs_item>-net_value,
-*             <fs_item>-tax.
-*      CONTINUE.
-*    ENDIF.
-*
-*    <fs_item>-item_no     = <fs_item_out>-ITM_NUMBER.
-*    <fs_item>-description = <fs_item_out>-short_text.
-*    <fs_item>-itca        = <fs_item_out>-item_categ.
-*    <fs_item>-currency    = gs_so_heder_ui-so_hdr_waerk.
-*    <fs_item>-plant       = <fs_item_out>-plant.       " <<< THÊM MỚI (Sửa lỗi Plant)
-*    <fs_item>-unit        = <fs_item_out>-sales_unit.  " <<< THÊM MỚI (Sửa lỗi Sales Unit)
-**    <fs_item>-net_price   = <fs_item_out>-net_price.  " Gán Net Price
-**    <fs_item>-unit_price  = <fs_item_out>-net_price.  " Gán Net Price vào cột "Amount"
-**    <fs_item>-net_value   = <fs_item_out>-net_value.
-**    <fs_item>-tax         = <fs_item_out>-tax_val.    " <<< Lấy thuế
-**    <fs_item>-per         = <fs_item_out>-cond_p_unt. " <<< Lấy "Per"
-*
-*    " <<< SỬA: Đọc từ BAPISDHEDU (Tên trường khác) >>>
-*    READ TABLE lt_sched_out ASSIGNING <fs_sched_out> WITH KEY itm_number = lv_posnr.
-*    IF sy-subrc = 0.
-*      <fs_item>-conf_qty = <fs_sched_out>-REQ_QTY. " <<< SỬA: Tên trường là SCHED_QTY
-*      IF <fs_item>-req_date IS INITIAL OR <fs_item>-req_date = '00000000'.
-*        <fs_item>-req_date = <fs_sched_out>-REQ_DATE. " <<< SỬA: Tên trường là DELIV_DATE
-*      ENDIF.
-*    ENDIF.
-*
-*   LOOP AT lt_cond_out ASSIGNING <fs_cond_out> WHERE itm_number = lv_posnr.
-*     <fs_item>-cond_type  = <fs_cond_out>-COND_TYPE.  " Gán tên 'ZPT0'
-*   ENDLOOP.
-*
-*
-**    " (Logic LOOP AT lt_cond_out... lấy giá... giữ nguyên)
-**    <fs_item>-net_price = 0.
-**    <fs_item>-net_value = 0.
-**    <fs_item>-tax       = 0.
-**    LOOP AT lt_cond_out ASSIGNING <fs_cond_out> WHERE itm_number = lv_posnr.
-**      CASE <fs_cond_out>-cond_type.
-**        WHEN 'NETP' OR 'PR00'.
-**          <fs_item>-net_price = <fs_cond_out>-cond_value.
-**        WHEN 'NETW'.
-**          <fs_item>-net_value = <fs_cond_out>-cond_value.
-**        WHEN 'MWST'.
-**          <fs_item>-tax = <fs_item>-tax + <fs_cond_out>-cond_value.
-**      ENDCASE.
-**    ENDLOOP.
-*    " (Xóa các lệnh 'ir_data_changed->modify_cell' khỏi đây)
-*
-*
-*  ENDLOOP.
-*
-*  " --- 5. Tính tổng và cập nhật 2 TRƯỜNG HEADER (Giữ nguyên) ---
-*  DATA: lv_total_net TYPE vbap-netwr,
-*        lv_total_tax TYPE vbap-mwsbp.
-*  CLEAR: lv_total_net, lv_total_tax.
-*  LOOP AT gt_item_details ASSIGNING <fs_item>.
-*    lv_total_net = lv_total_net + <fs_item>-net_value.
-*    lv_total_tax = lv_total_tax + <fs_item>-tax.
-*  ENDLOOP.
-*
-*  gs_so_heder_ui-SO_HDR_TOTAL_NET = lv_total_net.
-*  gs_so_heder_ui-SO_HDR_TOTAL_TAX = lv_total_tax.
-*
-*  " --- 6. Xử lý lỗi (Giữ nguyên) ---
-*  LOOP AT lt_return ASSIGNING FIELD-SYMBOL(<ret>) WHERE type CA 'AEX'.
-*    lv_errors_occurred = abap_true.
-*    MESSAGE <ret>-message TYPE 'S' DISPLAY LIKE 'E'.
-*    EXIT.
-*  ENDLOOP.
-*
-*  IF lv_errors_occurred = abap_false.
-*    MESSAGE 'Item details simulated successfully. Totals updated.' TYPE 'S'.
-*  ENDIF.
-*ENDFORM.
-
 
 *&---------------------------------------------------------------------*
 *& Form GET_SALES_AREA_FROM_POPUP (SỬA LỖI SY-SUBRC = 1)
@@ -5631,13 +5055,13 @@ FORM get_sales_area_from_popup
            vtext TYPE text120,
          END OF ty_sales_area_f4.
 
-  DATA: lt_knvv        TYPE STANDARD TABLE OF knvv,
-        ls_knvv        TYPE knvv,
-        lt_f4_data     TYPE STANDARD TABLE OF ty_sales_area_f4,
-        ls_f4_data     TYPE ty_sales_area_f4,
-        lt_fieldcat    TYPE slis_t_fieldcat_alv, " Dùng SLIS
-        ls_fieldcat    TYPE slis_fieldcat_alv, " Dùng SLIS
-        ls_selfield    TYPE slis_selfield.
+  DATA: lt_knvv     TYPE STANDARD TABLE OF knvv,
+        ls_knvv     TYPE knvv,
+        lt_f4_data  TYPE STANDARD TABLE OF ty_sales_area_f4,
+        ls_f4_data  TYPE ty_sales_area_f4,
+        lt_fieldcat TYPE slis_t_fieldcat_alv, " Dùng SLIS
+        ls_fieldcat TYPE slis_fieldcat_alv, " Dùng SLIS
+        ls_selfield TYPE slis_selfield.
 
   " 2. Tìm tất cả Sales Area (Giữ nguyên)
   SELECT vkorg, vtweg, spart
@@ -5881,28 +5305,25 @@ FORM display_incompletion_popup
       OTHERS                = 2.
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form DISPLAY_CONDITIONS_FOR_ITEM (SỬA LỖI ICON - DÙNG LOGIC CỦA BẠN)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM display_conditions_for_item USING iv_item_index TYPE sy-tabix.
 
   FIELD-SYMBOLS <fs_item> TYPE ty_item_details.
+
+  " Khai báo biến cục bộ cho BAPI
   DATA: ls_header_in  TYPE bapisdhead,
         lt_item_in    TYPE TABLE OF bapiitemin,
         lt_partner_in TYPE TABLE OF bapipartnr,
         lt_sched_in   TYPE TABLE OF bapischdl,
-        lt_item_out   TYPE TABLE OF bapiitemex,
-        lt_sched_out  TYPE TABLE OF bapisdhedu,
         lt_cond_out   TYPE TABLE OF bapicond,
-        lt_return     TYPE TABLE OF bapiret2,
-        lt_incomplete TYPE TABLE OF bapiincomp.
+        lt_return     TYPE TABLE OF bapiret2.
 
-  " 1. Đọc Item hiện tại
+  " Biến cho Cache
+  DATA: ls_cache TYPE ty_cond_cache.
+
+  " 1. Đọc Item hiện tại từ bảng chi tiết
   READ TABLE gt_item_details ASSIGNING <fs_item> INDEX iv_item_index.
   IF sy-subrc <> 0.
-    CLEAR: gs_so_heder_ui-so_hdr_matnr, gs_so_heder_ui-so_hdr_maktx,
-           gs_so_heder_ui-so_hdr_fkdat,
-           gs_so_heder_ui-so_hdr_total_net, gs_so_heder_ui-so_hdr_total_tax.
     REFRESH gt_conditions_alv.
     IF go_grid_conditions IS BOUND.
       go_grid_conditions->refresh_table_display( ).
@@ -5910,139 +5331,717 @@ FORM display_conditions_for_item USING iv_item_index TYPE sy-tabix.
     EXIT.
   ENDIF.
 
-  " 2. Cập nhật các trường Header
-  gs_so_heder_ui-so_hdr_matnr = <fs_item>-matnr.
-  gs_so_heder_ui-so_hdr_maktx = <fs_item>-description.
-  gs_so_heder_ui-so_hdr_fkdat = sy-datum.
-  gs_so_heder_ui-so_hdr_total_net = <fs_item>-net_value.
-  gs_so_heder_ui-so_hdr_total_tax = <fs_item>-tax.
+  " ====================================================================
+  " BƯỚC 1: CHECK CACHE TỪ BẢNG GLOBAL (QUAN TRỌNG)
+  " ====================================================================
+  " Logic: Kiểm tra xem Item này đã có dữ liệu Condition trong bộ nhớ chưa?
+  " Nếu có (do user vừa nhập hoặc đã load trước đó) -> Lấy ra dùng ngay.
 
-  " 3. Chuẩn bị BAPI
+  READ TABLE gt_cond_cache INTO ls_cache WITH TABLE KEY item_no = <fs_item>-item_no.
+
+  IF sy-subrc = 0 AND ls_cache-conditions IS NOT INITIAL..
+    " >>> FOUND IN CACHE: Dùng lại dữ liệu cũ, KHÔNG gọi BAPI
+    gt_conditions_alv = ls_cache-conditions.
+
+    " Refresh ALV và thoát Form ngay lập tức
+    IF go_grid_conditions IS BOUND.
+      DATA: ls_stable TYPE lvc_s_stbl.
+      ls_stable-row = 'X'. ls_stable-col = 'X'.
+      go_grid_conditions->refresh_table_display( is_stable = ls_stable ).
+
+      DATA(lv_rows_cache) = lines( gt_conditions_alv ).
+      go_grid_conditions->set_gridtitle( |Pricing Elements ({ lv_rows_cache } rows)| ).
+    ENDIF.
+    RETURN. " <--- THOÁT NGAY, KHÔNG CHẠY XUỐNG DƯỚI
+  ENDIF.
+
+
+  " ====================================================================
+  " BƯỚC 2: CHUẨN BỊ VÀ GỌI BAPI SIMULATION (CHỈ CHẠY KHI CACHE RỖNG)
+  " ====================================================================
+
+  " Cập nhật biến Global loại Order (để chắc chắn)
+  gv_order_type = gs_so_heder_ui-so_hdr_auart.
+
+  " --- Map Header ---
   ls_header_in-doc_type   = gs_so_heder_ui-so_hdr_auart.
   ls_header_in-sales_org  = gs_so_heder_ui-so_hdr_vkorg.
   ls_header_in-distr_chan = gs_so_heder_ui-so_hdr_vtweg.
   ls_header_in-division   = gs_so_heder_ui-so_hdr_spart.
+
+  " --- Map Partner ---
   DATA(lv_sold_to) = gs_so_heder_ui-so_hdr_sold_addr.
   CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_sold_to IMPORTING output = lv_sold_to.
   APPEND VALUE #( partn_role = 'AG' partn_numb = lv_sold_to ) TO lt_partner_in.
   APPEND VALUE #( partn_role = 'WE' partn_numb = lv_sold_to ) TO lt_partner_in.
 
+  " --- Map Item ---
   DATA(lv_matnr_bapi) = <fs_item>-matnr.
   CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_matnr_bapi IMPORTING output = lv_matnr_bapi.
-  APPEND VALUE #( itm_number = <fs_item>-item_no
-                  material   = lv_matnr_bapi
-                  plant      = <fs_item>-plant
-                  store_loc  = <fs_item>-store_loc
-                ) TO lt_item_in.
-  APPEND VALUE #( itm_number = <fs_item>-item_no
-                  req_qty    = <fs_item>-quantity
-                  req_date   = <fs_item>-req_date
-                ) TO lt_sched_in.
 
-*   " === THÊM LẠI: Gửi giá trị thủ công (từ "bộ nhớ") đến BAPI ===
-*  REFRESH lt_cond_in.
-*  IF <fs_item>-cond_type IS NOT INITIAL AND <fs_item>-unit_price IS NOT INITIAL.
-*    APPEND VALUE #(
-*      itm_number = <fs_item>-item_no
-*      cond_type  = <fs_item>-cond_type
-*      cond_value = <fs_item>-unit_price " Gửi giá 200
-*      currency   = <fs_item>-currency
-*    ) TO lt_cond_in.
-*  ENDIF.
-*  " === KẾT THÚC THÊM ===
+  DATA(ls_item_bapi) = VALUE bapiitemin(
+                         itm_number = <fs_item>-item_no
+                         material   = lv_matnr_bapi
+                         plant      = <fs_item>-plant
+                         store_loc  = <fs_item>-store_loc ).
 
-  " 5. Gọi BAPI (Đã xóa order_conditions_in)
-  CALL FUNCTION 'BAPI_SALESORDER_SIMULATE'
-    EXPORTING
-      order_header_in     = ls_header_in
-    TABLES
-      order_items_in      = lt_item_in
-      order_partners      = lt_partner_in
-      order_schedule_in  = lt_sched_in
-      order_items_out     = lt_item_out
-      order_schedule_ex   = lt_sched_out
-      order_condition_ex  = lt_cond_out
-      order_incomplete    = lt_incomplete
-      messagetable        = lt_return.
-
-
-    " 6. Xử lý kết quả (Chỉ LOOP lt_cond_out)
-  REFRESH gt_conditions_alv.
-  DATA: ls_cond_alv TYPE ty_cond_alv.
-  DATA: lv_icon_active   TYPE icon-internal,
-        lv_icon_inactive TYPE icon-internal.
-  SELECT SINGLE internal INTO lv_icon_active FROM icon WHERE name = gc_icon_green.
-  SELECT SINGLE internal INTO lv_icon_inactive FROM icon WHERE name = gc_icon_red.
-
-  DATA: lv_base_value TYPE kwert, " (Biến tạm lưu Cond. Value của ZPRQ)
-        lv_tax_rate   TYPE bapicond-cond_value.
-
-  " --- [LOGIC ĐƠN GIẢN MỚI] ---
-  LOOP AT lt_cond_out ASSIGNING FIELD-SYMBOL(<fs_cond_out>).
-    " (Chỉ hiển thị ZPRQ và ZTAX như bug11.png)
-    IF <fs_cond_out>-cond_type <> 'ZPRQ' AND <fs_cond_out>-cond_type <> 'ZTAX'.
-      CONTINUE.
-    ENDIF.
-
-    CLEAR ls_cond_alv.
-    ls_cond_alv-kschl = <fs_cond_out>-cond_type.
-
-    " Lấy Description (VTEXT)
-    SELECT SINGLE vtext FROM t685t INTO ls_cond_alv-vtext
-      WHERE spras = sy-langu AND kschl = <fs_cond_out>-cond_type.
-
-    " === SỬA LỖI HIỂN THỊ (Lỗi 1, 2 - bug9.png vs bug11.png) ===
-    ls_cond_alv-amount     = <fs_cond_out>-cond_value. " (8.00)
-    ls_cond_alv-waers      = <fs_cond_out>-currency.   " (VND)
-    IF <fs_cond_out>-cond_unit IS NOT INITIAL.
-       ls_cond_alv-waers = <fs_cond_out>-cond_unit. " Gán '%'
-    ENDIF.
-    ls_cond_alv-kpein      = <fs_cond_out>-cond_p_unt. " (1)
-    ls_cond_alv-kmein      = <fs_cond_out>-cond_unit.  " (EA)
-    " (Không gán cond_value từ BAPI nữa)
-    " === KẾT THÚC SỬA ===
-
-    IF <fs_cond_out>-condisacti = 'X'.
-      ls_cond_alv-icon = lv_icon_inactive.
-    ELSE.
-      ls_cond_alv-icon = lv_icon_active.
-    ENDIF.
-
-    " === LOGIC TÍNH TOÁN & HIỂN THỊ (Yêu cầu 3) ===
-
-    " (A) Xử lý ZPRQ (Giá chính)
-    IF ls_cond_alv-kschl = 'ZPRQ'. " (Hoặc ZPT0)
-      IF <fs_item>-cond_type = ls_cond_alv-kschl.
-         " User đã nhập tay -> Ưu tiên
-         ls_cond_alv-amount = <fs_item>-unit_price.
-         ls_cond_alv-icon = lv_icon_active.
-      ENDIF.
-      " Tính Cond. Value (Qty * Amount)
-      ls_cond_alv-cond_value = <fs_item>-quantity * ls_cond_alv-amount.
-      lv_base_value = ls_cond_alv-cond_value. " Lưu lại (ví dụ 40,000)
-    ENDIF.
-
-    " (B) Xử lý ZTAX (Thuế)
-    IF ls_cond_alv-kschl = 'ZTAX'.
-      lv_tax_rate = ls_cond_alv-amount / 100. " (8.00% -> 0.08)
-      " Tính Cond. Value (Base * Tax Rate)
-      ls_cond_alv-cond_value = lv_base_value * lv_tax_rate. " (40,000 * 0.08 = 3,200)
-      ls_cond_alv-icon = lv_icon_active.
-    ENDIF.
-
-    APPEND ls_cond_alv TO gt_conditions_alv.
-  ENDLOOP.
-
-  " 7. Refresh ALV
-  IF go_grid_conditions IS BOUND.
-    go_grid_conditions->refresh_table_display( ).
+  " Xử lý riêng cho ZDR (Target Qty) và ZORR (Req Qty)
+  IF gs_so_heder_ui-so_hdr_auart = 'ZDR'.
+     ls_item_bapi-target_qty = <fs_item>-quantity.
+     ls_item_bapi-target_qu  = <fs_item>-unit.
+     APPEND ls_item_bapi TO lt_item_in.
+     " ZDR không cần Schedule line cho Pricing Simulation
+  ELSE.
+     APPEND ls_item_bapi TO lt_item_in.
+     APPEND VALUE #( itm_number = <fs_item>-item_no
+                     req_qty    = <fs_item>-quantity
+                     req_date   = <fs_item>-req_date ) TO lt_sched_in.
   ENDIF.
 
-  " 8. [SỬA] Cập nhật Tiêu đề ALV (Lỗi "0 rows")
+  " --- Gọi BAPI ---
+  CALL FUNCTION 'BAPI_SALESORDER_SIMULATE'
+    EXPORTING
+      order_header_in    = ls_header_in
+    TABLES
+      order_items_in     = lt_item_in
+      order_partners     = lt_partner_in
+      order_schedule_in  = lt_sched_in
+      order_condition_ex = lt_cond_out
+      messagetable       = lt_return.
+
+  " ====================================================================
+  " BƯỚC 3: PHÂN TÍCH KẾT QUẢ BAPI
+  " ====================================================================
+  DATA: lv_bapi_price TYPE kbetr,
+        lv_bapi_curr  TYPE waers,
+        lv_bapi_per   TYPE kpein,
+        lv_bapi_uom   TYPE kmein,
+        lv_bapi_tax   TYPE kbetr.
+
+  " Mặc định
+  lv_bapi_curr = 'VND'.
+  lv_bapi_per  = 1.
+  lv_bapi_uom  = <fs_item>-unit.
+
+  " Lấy giá từ BAPI Output
+  LOOP AT lt_cond_out ASSIGNING FIELD-SYMBOL(<fs_cond_out>).
+    CASE <fs_cond_out>-cond_type.
+      WHEN 'ZPRQ' OR 'PR00'. " Giá gốc
+        lv_bapi_price = <fs_cond_out>-cond_value.
+        lv_bapi_curr  = <fs_cond_out>-currency.
+        lv_bapi_per   = <fs_cond_out>-cond_p_unt.
+        lv_bapi_uom   = <fs_cond_out>-cond_unit.
+      WHEN 'ZTAX' OR 'MWST'. " Thuế
+        lv_bapi_tax   = <fs_cond_out>-cond_value.
+        " Fix logic % nếu BAPI trả về 0.08 mà muốn hiện 8
+        IF lv_bapi_tax < 1 AND lv_bapi_tax > 0.
+             lv_bapi_tax = lv_bapi_tax * 100.
+        ENDIF.
+    ENDCASE.
+  ENDLOOP.
+
+  " Ưu tiên: Nếu tab Item đã có Unit Price (do user nhập), lấy giá đó
+  IF <fs_item>-unit_price IS NOT INITIAL.
+    lv_bapi_price = <fs_item>-unit_price.
+  ENDIF.
+
+  IF lv_bapi_tax IS INITIAL. lv_bapi_tax = 8. ENDIF. " Default thuế nếu không thấy
+
+  " ====================================================================
+  " BƯỚC 4: BUILD ALV THEO LOẠI ORDER (ZORR vs ZDR)
+  " ====================================================================
+  REFRESH gt_conditions_alv.
+
+  CASE gs_so_heder_ui-so_hdr_auart.
+
+    " --- Case ZORR (Sales Order) ---
+    WHEN 'ZORR' OR 'ZTP'.
+      PERFORM build_conditions_zorr
+        USING lv_bapi_price
+              lv_bapi_tax
+              lv_bapi_curr
+              lv_bapi_per
+              lv_bapi_uom
+              <fs_item>-quantity.
+
+    " --- Case ZDR (Debit Memo Request) ---
+    WHEN 'ZDR'.
+       PERFORM build_conditions_zdr
+         USING lv_bapi_price
+               lv_bapi_curr
+               lv_bapi_per
+               lv_bapi_uom
+               <fs_item>-quantity.
+
+   " --- [MỚI] Case ZCRR (Credit) ---
+    WHEN 'ZCRR'.
+       PERFORM build_conditions_zcrr " Dùng ZCRP
+         USING lv_bapi_price
+               lv_bapi_curr
+               lv_bapi_per
+               lv_bapi_uom
+               <fs_item>-quantity.
+
+   " >>> [MỚI] THÊM CASE ZRET
+    WHEN 'ZRET'.
+       PERFORM build_conditions_zret
+         USING lv_bapi_price
+               lv_bapi_curr
+               lv_bapi_per
+               lv_bapi_uom
+               <fs_item>-quantity.
+   " >>> [MỚI]
+     WHEN 'ZSC'.
+        PERFORM build_conditions_zsc
+          USING lv_bapi_price
+                lv_bapi_curr
+                lv_bapi_per
+                lv_bapi_uom
+                <fs_item>-quantity.
+    " >>> [MỚI] CASE ZFOC
+     WHEN 'ZFOC'.
+        PERFORM build_conditions_zfoc
+          USING lv_bapi_price
+                lv_bapi_curr
+                lv_bapi_per
+                lv_bapi_uom
+                <fs_item>-quantity.
+
+    " --- Case Default ---
+    WHEN OTHERS.
+       " Gọi logic mặc định (ví dụ giống ZORR)
+       PERFORM build_conditions_zorr
+        USING lv_bapi_price
+              lv_bapi_tax
+              lv_bapi_curr
+              lv_bapi_per
+              lv_bapi_uom
+              <fs_item>-quantity.
+  ENDCASE.
+
+  " ====================================================================
+  " BƯỚC 5: LƯU VÀO CACHE GLOBAL (QUAN TRỌNG)
+  " ====================================================================
+  " Lưu lại kết quả vừa tính toán để lần sau check ở Bước 1 sẽ thấy
+
+  ls_cache-item_no    = <fs_item>-item_no.
+  ls_cache-conditions = gt_conditions_alv.
+
+  INSERT ls_cache INTO TABLE gt_cond_cache.
+  IF sy-subrc <> 0.
+     MODIFY TABLE gt_cond_cache FROM ls_cache.
+  ENDIF.
+
+  " ====================================================================
+  " BƯỚC 6: REFRESH HIỂN THỊ
+  " ====================================================================
   IF go_grid_conditions IS BOUND.
+    go_grid_conditions->refresh_table_display( ).
     DATA(lv_rows) = lines( gt_conditions_alv ).
     go_grid_conditions->set_gridtitle( |Pricing Elements ({ lv_rows } rows)| ).
   ENDIF.
+
+ENDFORM.
+
+FORM build_conditions_zorr USING pv_price TYPE kbetr
+                                 pv_tax   TYPE kbetr
+                                 pv_curr  TYPE waers
+                                 pv_per   TYPE kpein
+                                 pv_uom   TYPE kmein
+                                 pv_qty   TYPE zquantity.
+
+  DATA: ls_cond  TYPE ty_cond_alv,
+        ls_style TYPE lvc_s_styl,
+        lv_net_val TYPE kwert.
+
+  " --- 1. ZPRQ (Unit Price) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'ZPRQ'.
+  ls_cond-vtext  = 'Unit Price'.
+  ls_cond-amount = pv_price.      " Giá từ BAPI hoặc User nhập
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+
+  " Tính Value: Giá * Qty
+  ls_cond-kwert  = ls_cond-amount * pv_qty.
+  lv_net_val     = ls_cond-kwert. " Lưu lại Net Value tổng
+
+  " [THÊM MỚI] Gán đèn xanh cho dòng này
+  ls_cond-icon   = icon_green_light.
+
+  " Set Editable cho ô Amount
+  ls_style-fieldname = 'AMOUNT'.
+  ls_style-style     = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- 2. NET VALUE (Read-only) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'NETW'.       " Mã ảo
+  ls_cond-vtext  = 'Net Value'.
+  ls_cond-amount = pv_price.     " Copy đơn giá
+  ls_cond-kwert  = lv_net_val.   " Copy tổng tiền
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+
+  " [THÊM MỚI] Gán đèn xanh
+  ls_cond-icon   = icon_green_light.
+
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- 3. ZTAX (Read-only) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'ZTAX'.
+  ls_cond-vtext  = 'Output Tax'.
+  ls_cond-amount = pv_tax.       " Thuế suất từ BAPI (VD: 8 hoặc 10)
+  ls_cond-waers  = '%'.
+  " Tính tiền thuế: Net Value * (Tax% / 100)
+  ls_cond-kwert  = ( lv_net_val * pv_tax ) / 100.
+
+  " [THÊM MỚI] Gán đèn xanh
+  ls_cond-icon   = icon_green_light.
+
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- 4. GROSS VALUE (Read-only) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'GROS'.
+  ls_cond-vtext  = 'Gross Value'.
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+
+  " Tính Đơn giá Gross: Price + (Price * Tax%)
+  ls_cond-amount = pv_price + ( ( pv_price * pv_tax ) / 100 ).
+
+  " Tính Tổng Gross: Amount Gross * Qty
+  ls_cond-kwert  = ls_cond-amount * pv_qty.
+
+  " [THÊM MỚI] Gán đèn xanh
+  ls_cond-icon   = icon_green_light.
+
+  APPEND ls_cond TO gt_conditions_alv.
+
+ENDFORM.
+
+FORM build_conditions_zdr USING pv_price TYPE kbetr
+                              pv_curr  TYPE waers
+                              pv_per   TYPE kpein
+                              pv_uom   TYPE kmein
+                              pv_qty   TYPE zquantity.
+
+  DATA: ls_cond TYPE ty_cond_alv,
+        ls_style TYPE lvc_s_styl.
+
+  DATA: lv_order_val TYPE kwert, " Biến tạm Order Value
+        lv_zdrp_val  TYPE kwert, " Biến tạm ZDRP
+        lv_z100_val  TYPE kwert. " Biến tạm Z100
+
+  " --- DÒNG 1: ZPRQ (Quantity/Price) - CHO PHÉP NHẬP ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'ZPRQ'.
+  ls_cond-vtext  = 'Quantity'.
+  ls_cond-amount = pv_price.
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+  ls_cond-kwert  = ls_cond-amount * pv_qty. " Value = Price * Qty
+  ls_cond-icon   = icon_green_light.
+
+  " Mở khóa Amount cho ZPRQ
+  ls_style-fieldname = 'AMOUNT'.
+  ls_style-style     = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_order_val = ls_cond-kwert. " Lưu Order Value
+
+  " --- DÒNG 2: ORDER VALUE (Read Only) ---
+  CLEAR ls_cond.
+  ls_cond-vtext  = 'Order Value'.
+  ls_cond-amount = pv_price.      " Copy Price
+  ls_cond-kwert  = lv_order_val.  " Copy Value từ ZPRQ
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+  ls_cond-icon   = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- DÒNG 3: ZDRP (Percentage - Debit) - CHO PHÉP NHẬP ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'ZDRP'.
+  ls_cond-vtext  = 'Percentage - Debit'.
+  ls_cond-waers  = '%'. " Quan trọng: Để ALV format 3 số thập phân (20.000)
+  ls_cond-amount = 0.
+  ls_cond-kwert  = 0.
+  ls_cond-icon   = icon_green_light.
+
+  " Mở khóa Amount cho ZDRP
+  ls_style-fieldname = 'AMOUNT'.
+  ls_style-style     = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- DÒNG 4: Z100 (-100% price) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'Z100'.
+  ls_cond-vtext  = '-100% price'.
+  ls_cond-waers  = '%'.
+  ls_cond-amount = -100. " [FIX]: Gán cứng -100
+
+  " Tính Value Z100 = Order Value * (-100%)
+  ls_cond-kwert  = ( lv_order_val * ls_cond-amount ) / 100.
+  lv_z100_val    = ls_cond-kwert.
+  ls_cond-icon   = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- DÒNG 5: NET VALUES (Tổng cộng) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'NETW'.
+  ls_cond-vtext  = 'Net Values'.
+  ls_cond-waers  = pv_curr. " Đơn vị tiền tệ (VND)
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+
+  " [1] Tính Tổng tiền (Condition Value)
+  " Công thức: Order Value + ZDRP (đang là 0) + Z100
+  ls_cond-kwert  = lv_order_val + 0 + lv_z100_val.
+
+  " [2] [FIX LỖI AMOUNT = 0]
+  " Tính Đơn giá ròng (Net Price) = Tổng tiền / Số lượng
+  IF pv_qty <> 0.
+     ls_cond-amount = ls_cond-kwert / pv_qty.
+  ELSE.
+     ls_cond-amount = 0.
+  ENDIF.
+
+  ls_cond-icon   = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+ENDFORM.
+
+FORM build_conditions_zcrr USING pv_price TYPE kbetr
+                                 pv_curr  TYPE waers
+                                 pv_per   TYPE kpein
+                                 pv_uom   TYPE kmein
+                                 pv_qty   TYPE zquantity.
+
+  DATA: ls_cond  TYPE ty_cond_alv,
+        ls_style TYPE lvc_s_styl.
+
+  DATA: lv_base_val TYPE kwert,
+        lv_zcrp_val TYPE kwert,
+        lv_net1_val TYPE kwert,
+        lv_z100_val TYPE kwert,
+        lv_net2_val TYPE kwert.
+
+  " 1. ZPRQ (Quantity)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'ZPRQ'. ls_cond-vtext = 'Quantity'.
+  ls_cond-amount = pv_price. " Đơn giá vẫn hiển thị Dương (2.000)
+  ls_cond-waers = pv_curr.
+  ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+
+  " [QUAN TRỌNG] Giá trị KWERT phải là ÂM cho Credit Memo
+  ls_cond-kwert = ( pv_price * pv_qty ) * -1.
+
+  ls_cond-icon = icon_green_light.
+  " Enable Edit
+  ls_style-fieldname = 'AMOUNT'. ls_style-style = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_base_val = ls_cond-kwert. " Lưu giá trị âm (-40.000)
+
+  " 2. Net Value (Subtotal)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'NETW'. ls_cond-vtext = 'Net Value'.
+  ls_cond-amount = pv_price. ls_cond-kwert = lv_base_val.
+  ls_cond-waers = pv_curr. ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  ls_cond-icon = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- DÒNG 3: ZCRP (Percentage - Credit) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'ZCRP'.
+  ls_cond-vtext  = 'Percentage - Credit'.
+
+  " [FIX 1]: KHÔNG LOAD SẴN SỐ (ĐỂ = 0 GIỐNG ZDRP)
+  ls_cond-amount = 0.
+
+  ls_cond-waers  = '%'.
+
+  " Value = 0 (Vì Amount = 0)
+  ls_cond-kwert  = 0.
+
+  ls_cond-icon   = icon_green_light.
+
+  " Enable Edit
+  ls_style-fieldname = 'AMOUNT'.
+  ls_style-style     = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_zcrp_val = ls_cond-kwert.
+
+  " 4. Net Value 1 (Base + Credit) -> (-40.000 + -8.000 = -48.000)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'NET1'. ls_cond-vtext = 'Net Value 1'.
+  ls_cond-kwert = lv_base_val + lv_zcrp_val.
+
+  IF pv_qty <> 0. ls_cond-amount = abs( ls_cond-kwert / pv_qty ). ENDIF. " Amount hiển thị dương
+  ls_cond-waers = pv_curr. ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  ls_cond-icon = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_net1_val = ls_cond-kwert.
+
+  " 5. Z100 (-100% price)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'Z100'. ls_cond-vtext = '-100% price'.
+  ls_cond-amount = -100. ls_cond-waers = '%'.
+
+  " Value = Base(Âm) * -100% = DƯƠNG (-40.000 * -1 = 40.000) -> Giống hình
+  ls_cond-kwert = ( lv_base_val * ls_cond-amount ) / 100.
+
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_z100_val = ls_cond-kwert.
+
+  " 6. Net Value 2 (Final Result) -> (-48.000 + 40.000 = -8.000)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'NET2'. ls_cond-vtext = 'Net Value 2'.
+  ls_cond-kwert = lv_net1_val + lv_z100_val.
+
+  IF pv_qty <> 0. ls_cond-amount = abs( ls_cond-kwert / pv_qty ). ENDIF.
+  ls_cond-waers = pv_curr. ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  ls_cond-icon = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_CONDITIONS_ZRET
+*&---------------------------------------------------------------------*
+* Build Condition ALV cho ZRET (Giống hình: ZPRQ -> Net Value)
+*----------------------------------------------------------------------*
+FORM build_conditions_zret USING pv_price TYPE kbetr
+                                 pv_curr  TYPE waers
+                                 pv_per   TYPE kpein
+                                 pv_uom   TYPE kmein
+                                 pv_qty   TYPE zquantity.
+
+  DATA: ls_cond  TYPE ty_cond_alv,
+        ls_style TYPE lvc_s_styl.
+
+  " --- DÒNG 1: ZPRQ (Quantity/Price) - CHO PHÉP NHẬP ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'ZPRQ'.
+  ls_cond-vtext  = 'Quantity'.
+  ls_cond-amount = pv_price.
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+  ls_cond-kwert  = ls_cond-amount * pv_qty. " Value = Price * Qty
+  ls_cond-icon   = icon_green_light.
+
+  " Mở khóa Amount cho ZPRQ
+  ls_style-fieldname = 'AMOUNT'.
+  ls_style-style     = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " --- DÒNG 2: NET VALUE (Tổng cộng) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'NETW'. " Mã ảo
+  ls_cond-vtext  = 'Net Value'.
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+
+  " Value = Giá trị của ZPRQ (Vì không có Tax)
+  ls_cond-kwert  = pv_price * pv_qty.
+
+  " Amount = Đơn giá ròng (Net Price)
+  ls_cond-amount = pv_price.
+
+  ls_cond-icon   = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+ENDFORM.
+
+FORM build_conditions_zsc USING pv_price TYPE kbetr
+                              pv_curr  TYPE waers
+                              pv_per   TYPE kpein
+                              pv_uom   TYPE kmein
+                              pv_qty   TYPE zquantity.
+
+  DATA: ls_cond  TYPE ty_cond_alv,
+        ls_style TYPE lvc_s_styl.
+
+  DATA: lv_base_val TYPE kwert, " ZPRQ Value
+        lv_zcf1_val TYPE kwert,
+        lv_net1_val TYPE kwert,
+        lv_z100_val TYPE kwert,
+        lv_net2_val TYPE kwert,
+        lv_tax_val  TYPE kwert.
+
+  " 1. ZPRQ (Quantity)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'ZPRQ'. ls_cond-vtext = 'Quantity'.
+  ls_cond-amount = pv_price. ls_cond-waers = pv_curr.
+  ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  ls_cond-kwert = pv_price * pv_qty.
+  ls_cond-icon = icon_green_light.
+  " Enable Edit
+  ls_style-fieldname = 'AMOUNT'. ls_style-style = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_base_val = ls_cond-kwert. " Lưu Base
+
+  " 2. Net Value (Copy ZPRQ)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'NETW'. ls_cond-vtext = 'Net Value'.
+  ls_cond-amount = pv_price. ls_cond-kwert = lv_base_val.
+  ls_cond-waers = pv_curr. ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  ls_cond-icon = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  " 3. ZCF1 (Commission fee)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'ZCF1'. ls_cond-vtext = 'Commission fee'.
+  ls_cond-amount = 20. ls_cond-waers = '%'. " Mặc định 20% hoặc load từ BAPI
+  ls_cond-kwert = ( lv_base_val * ls_cond-amount ) / 100.
+  ls_cond-icon = icon_green_light.
+  " Enable Edit
+  ls_style-fieldname = 'AMOUNT'. ls_style-style = cl_gui_alv_grid=>mc_style_enabled.
+  INSERT ls_style INTO TABLE ls_cond-cell_style.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_zcf1_val = ls_cond-kwert.
+
+  " 4. Net Value 1 (Base + Commission)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'NET1'. ls_cond-vtext = 'Net Value 1'.
+  ls_cond-kwert = lv_base_val + lv_zcf1_val.
+  IF pv_qty <> 0. ls_cond-amount = ls_cond-kwert / pv_qty. ENDIF.
+  ls_cond-waers = pv_curr. ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_net1_val = ls_cond-kwert.
+
+  " 5. Z100 (-100% price)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'Z100'. ls_cond-vtext = '-100% price'.
+  ls_cond-amount = -100. ls_cond-waers = '%'.
+  ls_cond-kwert = ( lv_base_val * ls_cond-amount ) / 100. " Tính trên Base ZPRQ
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_z100_val = ls_cond-kwert.
+
+  " 6. Net Value 2 (Net 1 + Z100)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'NET2'. ls_cond-vtext = 'Net Value 2'.
+  ls_cond-kwert = lv_net1_val + lv_z100_val.
+  IF pv_qty <> 0. ls_cond-amount = ls_cond-kwert / pv_qty. ENDIF.
+  ls_cond-waers = pv_curr. ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  ls_cond-icon = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_net2_val = ls_cond-kwert.
+
+  " 7. ZTAX (Output Tax)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'ZTAX'. ls_cond-vtext = 'Output Tax'.
+  ls_cond-amount = 8. ls_cond-waers = '%'. " Mặc định 8%
+  ls_cond-kwert = ( lv_net2_val * ls_cond-amount ) / 100. " Tính trên Net 2
+  ls_cond-icon = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_tax_val = ls_cond-kwert.
+
+  " 8. Gross Value (Net 2 + Tax)
+  CLEAR ls_cond.
+  ls_cond-kschl = 'GROS'. ls_cond-vtext = 'Gross Value (After Tax)'.
+  ls_cond-kwert = lv_net2_val + lv_tax_val.
+  IF pv_qty <> 0. ls_cond-amount = ls_cond-kwert / pv_qty. ENDIF.
+  ls_cond-waers = pv_curr. ls_cond-kpein = pv_per. ls_cond-kmein = pv_uom.
+  ls_cond-icon = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_CONDITIONS_ZFOC
+*&---------------------------------------------------------------------*
+* Build Condition ALV cho ZFOC (Net Value -> Z100 -> Net Value 1)
+* Tất cả đều Read-Only
+*----------------------------------------------------------------------*
+FORM build_conditions_zfoc USING pv_price TYPE kbetr
+                                 pv_curr  TYPE waers
+                                 pv_per   TYPE kpein
+                                 pv_uom   TYPE kmein
+                                 pv_qty   TYPE zquantity.
+
+  DATA: ls_cond  TYPE ty_cond_alv.
+
+  DATA: lv_base_val TYPE kwert,
+        lv_z100_val TYPE kwert,
+        lv_net1_val TYPE kwert.
+
+  " --- DÒNG 1: NET VALUE (Lấy từ Price) ---
+  " Lưu ý: Ở ZFOC, dòng đầu tiên thường hiển thị là 'Net Value' luôn
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'NETW'.
+  ls_cond-vtext  = 'Net Value'.
+  ls_cond-amount = pv_price.
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+  ls_cond-kwert  = pv_price * pv_qty.
+  ls_cond-icon   = icon_green_light.
+  " [QUAN TRỌNG]: KHÔNG mở khóa Amount (Read-only)
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_base_val = ls_cond-kwert.
+
+  " --- DÒNG 2: Z100 (-100% price) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'Z100'.
+  ls_cond-vtext  = '-100% price'.
+  ls_cond-amount = -100.
+  ls_cond-waers  = '%'.
+
+  " Value = Base * -100%
+  ls_cond-kwert  = ( lv_base_val * ls_cond-amount ) / 100.
+  ls_cond-icon   = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
+
+  lv_z100_val = ls_cond-kwert.
+
+  " --- DÒNG 3: NET VALUE 1 (Tổng sau chiết khấu) ---
+  CLEAR ls_cond.
+  ls_cond-kschl  = 'NET1'.
+  ls_cond-vtext  = 'Net Value 1'.
+
+  " Value = Base + Z100 Value (Thường sẽ bằng 0)
+  ls_cond-kwert  = lv_base_val + lv_z100_val.
+
+  " Amount = Value / Qty
+  IF pv_qty <> 0.
+     ls_cond-amount = ls_cond-kwert / pv_qty.
+  ELSE.
+     ls_cond-amount = 0.
+  ENDIF.
+
+  ls_cond-waers  = pv_curr.
+  ls_cond-kpein  = pv_per.
+  ls_cond-kmein  = pv_uom.
+  ls_cond-icon   = icon_green_light.
+  APPEND ls_cond TO gt_conditions_alv.
 
 ENDFORM.
 
@@ -6065,11 +6064,11 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 FORM get_data.
 
-  DATA: lt_join   TYPE STANDARD TABLE OF zsd4_so_monitoring,
-        ls_join   TYPE zsd4_so_monitoring,
-        ls_vbuk   TYPE vbuk,
-        lv_name1  TYPE kna1-name1,
-        ls_data   TYPE zsd4_so_monitoring.
+  DATA: lt_join  TYPE STANDARD TABLE OF zsd4_so_monitoring,
+        ls_join  TYPE zsd4_so_monitoring,
+        ls_vbuk  TYPE vbuk,
+        lv_name1 TYPE kna1-name1,
+        ls_data  TYPE zsd4_so_monitoring.
 
 *-- Bước 1: Lấy dữ liệu từ VBAK + VBAP
   SELECT a~vbeln, a~auart, a~erdat, a~vdatu,
@@ -6117,22 +6116,22 @@ FORM load_monitoring_data.
 
   " Khai báo cấu trúc cho kết quả SELECT
   TYPES: BEGIN OF ty_join_result,
-           vbeln TYPE vbak-vbeln,
-           auart TYPE vbak-auart,
-           erdat TYPE vbak-erdat,
-           vdatu TYPE vbak-vdatu,
-           vkorg TYPE vbak-vkorg,
-           vtweg TYPE vbak-vtweg,
-           spart TYPE vbak-spart,
-           kunnr TYPE vbak-kunnr,
-           name1 TYPE kna1-name1,
-           posnr TYPE vbap-posnr,
-           matnr TYPE vbap-matnr,
+           vbeln  TYPE vbak-vbeln,
+           auart  TYPE vbak-auart,
+           erdat  TYPE vbak-erdat,
+           vdatu  TYPE vbak-vdatu,
+           vkorg  TYPE vbak-vkorg,
+           vtweg  TYPE vbak-vtweg,
+           spart  TYPE vbak-spart,
+           kunnr  TYPE vbak-kunnr,
+           name1  TYPE kna1-name1,
+           posnr  TYPE vbap-posnr,
+           matnr  TYPE vbap-matnr,
            kwmeng TYPE vbap-kwmeng,
-           vrkme TYPE vbap-vrkme,
-           netwr TYPE vbap-netwr,
-           waerk TYPE vbak-waerk,
-           abgru TYPE vbap-abgru, " Reason for rejection (Item)
+           vrkme  TYPE vbap-vrkme,
+           netwr  TYPE vbap-netwr,
+           waerk  TYPE vbak-waerk,
+           abgru  TYPE vbap-abgru, " Reason for rejection (Item)
          END OF ty_join_result.
 
   DATA: lt_join_result TYPE STANDARD TABLE OF ty_join_result.
@@ -6143,13 +6142,13 @@ FORM load_monitoring_data.
   CLEAR: toso, to_val, to_sta. " (Dùng tên biến global từ Screen 600)
 
   " --- 2. Xây dựng WHERE clause (Dynamic) ---
-  DATA: lt_range_erdat  TYPE RANGE OF vbak-erdat,
-        lt_range_vbeln  TYPE RANGE OF vbak-vbeln,
-        lt_range_kunnr  TYPE RANGE OF vbak-kunnr,
-        lt_range_matnr  TYPE RANGE OF vbap-matnr,
-        lt_range_vkorg  TYPE RANGE OF vbak-vkorg,
-        lt_range_vtweg  TYPE RANGE OF vbak-vtweg,
-        lt_range_spart  TYPE RANGE OF vbak-spart.
+  DATA: lt_range_erdat TYPE RANGE OF vbak-erdat,
+        lt_range_vbeln TYPE RANGE OF vbak-vbeln,
+        lt_range_kunnr TYPE RANGE OF vbak-kunnr,
+        lt_range_matnr TYPE RANGE OF vbap-matnr,
+        lt_range_vkorg TYPE RANGE OF vbak-vkorg,
+        lt_range_vtweg TYPE RANGE OF vbak-vtweg,
+        lt_range_spart TYPE RANGE OF vbak-spart.
 
   " Build range cho Date (SỬA LỖI CÚ PHÁP)
   IF from_dat IS NOT INITIAL OR to_dat IS NOT INITIAL.
@@ -6167,17 +6166,26 @@ FORM load_monitoring_data.
   " (Code build range cho các trường khác giữ nguyên)
   IF sales_ord IS NOT INITIAL.
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input = sales_ord IMPORTING output = sales_ord.
+      EXPORTING
+        input  = sales_ord
+      IMPORTING
+        output = sales_ord.
     APPEND VALUE #( sign = 'I' option = 'EQ' low = sales_ord ) TO lt_range_vbeln.
   ENDIF.
   IF sold_to IS NOT INITIAL.
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input = sold_to IMPORTING output = sold_to.
+      EXPORTING
+        input  = sold_to
+      IMPORTING
+        output = sold_to.
     APPEND VALUE #( sign = 'I' option = 'EQ' low = sold_to ) TO lt_range_kunnr.
   ENDIF.
   IF material IS NOT INITIAL.
     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input = material IMPORTING output = material.
+      EXPORTING
+        input  = material
+      IMPORTING
+        output = material.
     APPEND VALUE #( sign = 'I' option = 'EQ' low = material ) TO lt_range_matnr.
   ENDIF.
   IF sale_org IS NOT INITIAL.
@@ -6452,12 +6460,12 @@ FORM perform_post_goods_issue.
 
 
   " Khai báo BAPI
-  DATA: ls_gm_header  TYPE bapi2017_gm_head_01,
-        ls_gm_code    TYPE bapi2017_gm_code,
-        lt_gm_item    TYPE TABLE OF bapi2017_gm_item_create,
-        ls_gm_item    TYPE bapi2017_gm_item_create,
-        lv_gm_docno   TYPE mblnr,
-        lv_gm_docyear TYPE mjahr,
+  DATA: ls_gm_header   TYPE bapi2017_gm_head_01,
+        ls_gm_code     TYPE bapi2017_gm_code,
+        lt_gm_item     TYPE TABLE OF bapi2017_gm_item_create,
+        ls_gm_item     TYPE bapi2017_gm_item_create,
+        lv_gm_docno    TYPE mblnr,
+        lv_gm_docyear  TYPE mjahr,
         lt_bapi_return TYPE TABLE OF bapiret2.
 
   FIELD-SYMBOLS: <fs_lips>     TYPE lips,
@@ -6557,7 +6565,7 @@ FORM perform_post_goods_issue.
       goodsmvt_item    = lt_gm_item
       return           = lt_bapi_return.
 
-      " 6. Xử lý kết quả BAPI
+  " 6. Xử lý kết quả BAPI
   DATA(lv_bapi_error) = abap_false.
 
   " <<< SỬA LỖI: Dùng 'TYPE' thay vì 'MSGTY' >>>
@@ -6597,9 +6605,7 @@ FORM perform_post_goods_issue.
 
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form DISPLAY_ERROR_LOG_POPUP (Hiển thị lỗi PGI)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM display_error_log_popup
   TABLES
     it_error_log TYPE ty_t_error_log. " <<< SỬA: Dùng kiểu global
@@ -6651,6 +6657,155 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form VALIDATE_TEMPLATE_STRUCTURE (Fixed Type Conflict)
 *&---------------------------------------------------------------------*
+*FORM validate_template_structure
+*  USING
+*    io_excel      TYPE REF TO cl_fdt_xl_spreadsheet
+*    iv_sheet      TYPE string
+*    iv_tabname    TYPE tabname
+*  CHANGING
+*    co_data_ref   TYPE REF TO data. " <<< [SỬA QUAN TRỌNG]: Đổi từ STANDARD TABLE sang REF TO DATA
+*
+*  FIELD-SYMBOLS: <fs_data_raw> TYPE STANDARD TABLE,
+*                 <fs_row_1>    TYPE any,
+*                 <lv_cell>     TYPE any.
+*
+*  " --- 1. Định nghĩa Khuôn mẫu (Golden Template) ---
+*  TYPES: BEGIN OF ty_golden,
+*           col_idx  TYPE i,
+*           col_name TYPE string,
+*         END OF ty_golden.
+*  DATA: lt_golden TYPE TABLE OF ty_golden.
+*
+*  IF iv_tabname = 'ZTB_SO_UPLOAD_HD'.
+*    lt_golden = VALUE #(
+*      ( col_idx = 1  col_name = 'TEMP ID' )
+*      ( col_idx = 2  col_name = '*SALES ORDER TYPE' )
+*      ( col_idx = 3  col_name = '*SALES ORG.' )
+*      ( col_idx = 4  col_name = '*DIST. CHNL' )
+*      ( col_idx = 5  col_name = '*DIVISION' )
+*      ( col_idx = 6  col_name = 'SALES OFFICE' )
+*      ( col_idx = 7  col_name = 'SALES GROUP' )
+*      ( col_idx = 8  col_name = '*SOLD-TO PARTY' )
+*      ( col_idx = 9  col_name = '*CUST. REF.' )
+*      ( col_idx = 10 col_name = '*REQUESTED DELIVERY DATE' )
+*      ( col_idx = 11 col_name = '*PAYT. TERM' )
+*      ( col_idx = 12 col_name = 'INCOTERM' )
+*      ( col_idx = 13 col_name = 'INCOTERM-LOCATION' )
+*    ).
+*  ELSEIF iv_tabname = 'ZTB_SO_UPLOAD_IT'.
+*    lt_golden = VALUE #(
+*      ( col_idx = 1  col_name = 'TEMP ID' )
+*      ( col_idx = 2  col_name = 'ITEM NO' )
+*      ( col_idx = 3  col_name = '*MATERIAL' )
+*      ( col_idx = 4  col_name = 'PLANT' )
+*      ( col_idx = 5  col_name = 'SHIPPING POINT' )
+*      ( col_idx = 6  col_name = 'STORAGE LOC.' )
+*      ( col_idx = 7  col_name = '*ORDER QUANTITY' )
+*    ).
+*  ELSEIF iv_tabname = 'ZTB_SO_UPLOAD_PR'.
+*    lt_golden = VALUE #(
+*      ( col_idx = 1  col_name = 'TEMP ID' )
+*      ( col_idx = 2  col_name = 'ITEM NO' )
+*      ( col_idx = 3  col_name = 'COND. TYPE' )
+*      ( col_idx = 4  col_name = 'AMOUNT' )
+*      ( col_idx = 5  col_name = 'CURRENCY' )
+*      ( col_idx = 6  col_name = 'PER' )
+*      ( col_idx = 7  col_name = 'UOM' )
+*    ).
+*  ENDIF.
+*
+*  " --- 2. Lấy dữ liệu thô từ Excel ---
+*  TRY.
+*      " [SỬA]: Lấy tham chiếu trực tiếp vào biến CHANGING
+*      co_data_ref = io_excel->if_fdt_doc_spreadsheet~get_itab_from_worksheet( iv_sheet ).
+*      ASSIGN co_data_ref->* TO <fs_data_raw>.
+*    CATCH cx_fdt_excel.
+*      MESSAGE |Sheet '{ iv_sheet }' not found in template.| TYPE 'S' DISPLAY LIKE 'E'.
+*      CLEAR co_data_ref.
+*      RETURN.
+*  ENDTRY.
+*
+*  " --- 3. Đọc dòng tiêu đề (Row 1) ---
+*  READ TABLE <fs_data_raw> ASSIGNING <fs_row_1> INDEX 1.
+*  IF sy-subrc <> 0.
+*    MESSAGE |Sheet '{ iv_sheet }' is empty.| TYPE 'S' DISPLAY LIKE 'E'.
+*    CLEAR co_data_ref. RETURN.
+*  ENDIF.
+*
+*  " --- 4. So sánh với Khuôn mẫu ---
+*  LOOP AT lt_golden INTO DATA(ls_golden).
+*    ASSIGN COMPONENT ls_golden-col_idx OF STRUCTURE <fs_row_1> TO <lv_cell>.
+*
+*    IF <lv_cell> IS NOT ASSIGNED.
+*      MESSAGE |Invalid Template: Column { ls_golden-col_idx } missing in sheet { iv_sheet }.| TYPE 'S' DISPLAY LIKE 'E'.
+*      CLEAR co_data_ref. RETURN.
+*    ENDIF.
+*
+*    DATA(lv_user_col) = |{ <lv_cell> }|.
+*    CONDENSE lv_user_col.
+*    TRANSLATE lv_user_col TO UPPER CASE.
+*
+*    IF lv_user_col <> ls_golden-col_name.
+*      MESSAGE |Template Error ({ iv_sheet }): Column { ls_golden-col_idx } should be '{ ls_golden-col_name }' but found '{ lv_user_col }'.|
+*        TYPE 'S' DISPLAY LIKE 'E'.
+*      CLEAR co_data_ref. RETURN.
+*    ENDIF.
+*  ENDLOOP.
+*
+*  " --- 5. Xóa dòng tiêu đề ---
+*  DELETE <fs_data_raw> INDEX 1.
+*  " (Biến co_data_ref trỏ vào <fs_data_raw> nên dữ liệu trả về đã sạch)
+*
+*ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Form DEFINE_GOLDEN_TEMPLATES (Task 3.3 - Đã thêm Schedule Line Date)
+*&---------------------------------------------------------------------*
+*FORM define_golden_templates
+*  TABLES
+*    ct_golden_header TYPE ty_t_excel_column
+*    ct_golden_item   TYPE ty_t_excel_column.
+*
+*  " --- 1. Định nghĩa khuôn mẫu "Header" ---
+*  REFRESH ct_golden_header.
+*  APPEND VALUE #( col_id = 'A' col_name = 'TEMP ID' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'B' col_name = '*SALES ORDER TYPE' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'C' col_name = '*SALES ORG.' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'D' col_name = '*DIST. CHNL' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'E' col_name = '*DIVISION' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'F' col_name = 'SALES OFFICE' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'G' col_name = 'SALES GROUP' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'H' col_name = '*SOLD-TO PARTY' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'I' col_name = '*CUST. REF.' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'J' col_name = '*REQUESTED DELIVERY DATE' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'K' col_name = 'PRICE DATE' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'L' col_name = '*PAYT. TERM' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'M' col_name = 'INCOTERM' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'N' col_name = 'CURRENCY' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'O' col_name = 'ORDER DATE' ) TO ct_golden_header.
+*  APPEND VALUE #( col_id = 'P' col_name = 'SHIP. COND.' ) TO ct_golden_header.
+*
+*  " --- 2. Định nghĩa khuôn mẫu "Item" ---
+*  REFRESH ct_golden_item.
+*  APPEND VALUE #( col_id = 'A' col_name = 'TEMP ID' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'B' col_name = 'PRICING PROCEDURE' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'C' col_name = 'ITEM NO' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'D' col_name = '*MATERIAL' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'E' col_name = 'SHORT TEXT' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'F' col_name = 'PLANT' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'G' col_name = 'SHIPPING POINT' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'H' col_name = '*STORAGE LOC.' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'I' col_name = '*ORDER QUANTITY' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'J' col_name = 'UNIT PRICE' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'K' col_name = 'PER' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'L' col_name = 'UOM' ) TO ct_golden_item.
+*  APPEND VALUE #( col_id = 'M' col_name = 'COND. TYPE' ) TO ct_golden_item.
+*
+*  " [GIỮ LẠI THEO YÊU CẦU] Cột N
+*  APPEND VALUE #( col_id = 'N' col_name = 'SCHEDULE LINE DATE' ) TO ct_golden_item.
+*
+*ENDFORM.
+
 FORM validate_template_structure
   USING
     io_excel      TYPE REF TO cl_fdt_xl_spreadsheet
@@ -6681,7 +6836,7 @@ FORM validate_template_structure
       ( col_idx = 7  col_name = 'SALES GROUP' )
       ( col_idx = 8  col_name = '*SOLD-TO PARTY' )
       ( col_idx = 9  col_name = '*CUST. REF.' )
-      ( col_idx = 10 col_name = '*REQUESTED DELIVERY DATE' )
+      ( col_idx = 10 col_name = 'REQUESTED DELIVERY DATE' )
       ( col_idx = 11 col_name = '*PAYT. TERM' )
       ( col_idx = 12 col_name = 'INCOTERM' )
       ( col_idx = 13 col_name = 'INCOTERM-LOCATION' )
@@ -6750,11 +6905,53 @@ FORM validate_template_structure
   DELETE <fs_data_raw> INDEX 1.
   " (Biến co_data_ref trỏ vào <fs_data_raw> nên dữ liệu trả về đã sạch)
 
+*    " --- 4. So sánh Chặt chẽ (Strict Comparison) ---
+*  DATA: lv_str_golden TYPE string,
+*        lv_str_file   TYPE string.
+*
+*  LOOP AT lt_golden INTO DATA(ls_golden).
+*    ASSIGN COMPONENT ls_golden-col_idx OF STRUCTURE <fs_row_1> TO <lv_cell>.
+*
+*    IF <lv_cell> IS NOT ASSIGNED.
+*      MESSAGE |Template Error: Column { ls_golden-col_idx } is missing.| TYPE 'S' DISPLAY LIKE 'E'.
+*      CLEAR co_data_ref. RETURN.
+*    ENDIF.
+*
+*    " --- LOGIC CHUẨN HÓA CHUỖI ---
+*    " 1. Lấy giá trị
+*    lv_str_file = |{ <lv_cell> }|.
+*    lv_str_golden = ls_golden-col_name.
+*
+*    " 2. Chuyển chữ hoa
+*    TRANSLATE lv_str_file TO UPPER CASE.
+*    TRANSLATE lv_str_golden TO UPPER CASE.
+*
+*    " 3. Loại bỏ ký tự đặc biệt (*, ., khoảng trắng) để so sánh cốt lõi
+*    " (Ví dụ: '*Sales Org.' sẽ thành 'SALESORG')
+*    REPLACE ALL OCCURRENCES OF '*' IN lv_str_file WITH ''.
+*    REPLACE ALL OCCURRENCES OF '.' IN lv_str_file WITH ''.
+*    CONDENSE lv_str_file NO-GAPS.
+*
+*    REPLACE ALL OCCURRENCES OF '*' IN lv_str_golden WITH ''.
+*    REPLACE ALL OCCURRENCES OF '.' IN lv_str_golden WITH ''.
+*    CONDENSE lv_str_golden NO-GAPS.
+*
+*    " 4. So sánh
+*    IF lv_str_file <> lv_str_golden.
+*      MESSAGE |Template Error ({ iv_sheet }): Column { ls_golden-col_idx } should be '{ ls_golden-col_name }' but found '{ <lv_cell> }'.|
+*        TYPE 'S' DISPLAY LIKE 'E'.
+*
+*      " [QUAN TRỌNG]: Clear tham chiếu để bên ngoài biết là lỗi
+*      CLEAR co_data_ref.
+*      RETURN.
+*    ENDIF.
+*  ENDLOOP.
+*
+*  " --- 5. Xóa dòng tiêu đề ---
+*  DELETE <fs_data_raw> INDEX 1.
+
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form DEFINE_GOLDEN_TEMPLATES (Task 3.3 - Đã thêm Schedule Line Date)
-*&---------------------------------------------------------------------*
 FORM define_golden_templates
   TABLES
     ct_golden_header TYPE ty_t_excel_column
@@ -7057,6 +7254,119 @@ ENDFORM.
 *
 *  go_html_viewer->show_url( lv_url ).
 *ENDFORM.
+*FORM build_html_summary.
+*  DATA: lv_html TYPE string,
+*        lt_html TYPE STANDARD TABLE OF w3html,
+*        ls_html TYPE w3html,
+*        lv_url  TYPE char1024.
+*
+*  " --- Biến chứa text số lượng ---
+*  DATA: txt_val_rdy  TYPE c LENGTH 10,
+*        txt_val_inc  TYPE c LENGTH 10,
+*        txt_val_err  TYPE c LENGTH 10,
+*        txt_suc_comp TYPE c LENGTH 10,
+*        txt_suc_inc  TYPE c LENGTH 10,
+*        txt_fail_err TYPE c LENGTH 10.
+*
+*  " Convert số sang text để nối chuỗi
+*  WRITE gv_cnt_val_ready   TO txt_val_rdy.   CONDENSE txt_val_rdy.
+*  WRITE gv_cnt_val_incomp  TO txt_val_inc.   CONDENSE txt_val_inc.
+*  WRITE gv_cnt_val_err     TO txt_val_err.   CONDENSE txt_val_err.
+*  WRITE gv_cnt_suc_comp    TO txt_suc_comp.  CONDENSE txt_suc_comp.
+*  WRITE gv_cnt_suc_incomp  TO txt_suc_inc.   CONDENSE txt_suc_inc.
+*  WRITE gv_cnt_fail_err    TO txt_fail_err.  CONDENSE txt_fail_err.
+*
+*  CLEAR lv_html.
+*
+*  " --- START HTML & CSS ---
+*  CONCATENATE lv_html
+*    '<html><head><meta charset="UTF-8"><style>'
+*    'body { font-family: Segoe UI, Arial, sans-serif; padding: 5px; background-color: #f2f2f2; margin: 0; }'
+*
+*    'h2 { color: #333; margin: 0 0 10px 0; font-size: 16px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }'
+*
+*    '.container { display: flex; gap: 15px; }'
+*
+*    '.card { background: #fff; width: 220px; border-radius: 6px;'
+*      'box-shadow: 0 2px 5px rgba(0,0,0,0.1); border: 1px solid #dcdcdc; overflow: hidden; }'
+*
+*    '.card-head { padding: 8px 12px; font-weight: bold; font-size: 13px; color: #fff; }'
+*    '.head-val  { background-color: #0078d4; }'
+*    '.head-suc  { background-color: #107c10; }'
+*    '.head-fail { background-color: #d13438; }'
+*
+*    '.card-body { padding: 10px; }'
+*
+*    '.row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }'
+*    '.label { color: #555; }'
+*    '.value { font-weight: bold; }'
+*
+*    '.st-ready { color: #107c10; }'
+*    '.st-warn  { color: #d83b01; }'
+*    '.st-err   { color: #d13438; }'
+*
+*    '</style></head><body>'
+*
+*    '<h2>Validation & Processing Summary</h2>'
+*    '<div class="container">'
+*
+*  INTO lv_html SEPARATED BY space.
+*
+*  " --- CARD 1: VALIDATED (Pending) ---
+*  CONCATENATE lv_html
+*    '<div class="card">'
+*      '<div class="card-head head-val">📝 Validated (Pending)</div>'
+*      '<div class="card-body">'
+*        '<div class="row"><span class="label">Ready:</span><span class="value st-ready">'      txt_val_rdy '</span></div>'
+*        '<div class="row"><span class="label">Incomplete:</span><span class="value st-warn">' txt_val_inc '</span></div>'
+*        '<div class="row"><span class="label">Error:</span><span class="value st-err">'       txt_val_err '</span></div>'
+*      '</div>'
+*    '</div>'
+*  INTO lv_html SEPARATED BY space.
+*
+*  " --- CARD 2: POSTED SUCCESSFULLY ---
+*  CONCATENATE lv_html
+*    '<div class="card">'
+*      '<div class="card-head head-suc">🚀 Posted Success</div>'
+*      '<div class="card-body">'
+*        '<div class="row"><span class="label">Complete SO:</span><span class="value st-ready">'   txt_suc_comp '</span></div>'
+*        '<div class="row"><span class="label">Incomplete SO:</span><span class="value st-warn">' txt_suc_inc  '</span></div>'
+*      '</div>'
+*    '</div>'
+*  INTO lv_html SEPARATED BY space.
+*
+*  " --- CARD 3: POSTED FAILED ---
+*  CONCATENATE lv_html
+*    '<div class="card">'
+*      '<div class="card-head head-fail">💥 Posted Failed</div>'
+*      '<div class="card-body">'
+*        '<div class="row"><span class="label">Failed (Error):</span><span class="value st-err">' txt_fail_err '</span></div>'
+*        " (Bạn có thể thêm dòng Failed Incomplete nếu logic BAPI có trả về)
+*      '</div>'
+*    '</div>'
+*  INTO lv_html SEPARATED BY space.
+*
+*  CONCATENATE lv_html '</div></body></html>' INTO lv_html.
+*
+*  " --- Convert & Display (Giữ nguyên code cũ) ---
+*  CLEAR lt_html.
+*  DATA: lv_len   TYPE i, lv_off TYPE i, lv_chunk TYPE i.
+*  lv_len = strlen( lv_html ).
+*  lv_off = 0.
+*  WHILE lv_off < lv_len.
+*    lv_chunk = lv_len - lv_off.
+*    IF lv_chunk > 255. lv_chunk = 255. ENDIF.
+*    ls_html-line = lv_html+lv_off(lv_chunk).
+*    APPEND ls_html TO lt_html.
+*    lv_off = lv_off + lv_chunk.
+*  ENDWHILE.
+*
+*  go_html_viewer->load_data( EXPORTING type = 'text/html' IMPORTING assigned_url = lv_url CHANGING data_table = lt_html ).
+*  go_html_viewer->show_url( lv_url ).
+*
+*ENDFORM.
+
+"chú ý 2
 FORM build_html_summary.
   DATA: lv_html TYPE string,
         lt_html TYPE STANDARD TABLE OF w3html,
@@ -7071,13 +7381,23 @@ FORM build_html_summary.
         txt_suc_inc   TYPE c LENGTH 10,
         txt_fail_err  TYPE c LENGTH 10.
 
-  " Convert số sang text để nối chuỗi
-  WRITE gv_cnt_val_ready   TO txt_val_rdy.   CONDENSE txt_val_rdy.
-  WRITE gv_cnt_val_incomp  TO txt_val_inc.   CONDENSE txt_val_inc.
-  WRITE gv_cnt_val_err     TO txt_val_err.   CONDENSE txt_val_err.
-  WRITE gv_cnt_suc_comp    TO txt_suc_comp.  CONDENSE txt_suc_comp.
-  WRITE gv_cnt_suc_incomp  TO txt_suc_inc.   CONDENSE txt_suc_inc.
-  WRITE gv_cnt_fail_err    TO txt_fail_err.  CONDENSE txt_fail_err.
+*  " Convert số sang text để nối chuỗi
+*  WRITE gv_cnt_val_ready   TO txt_val_rdy.   CONDENSE txt_val_rdy.
+*  WRITE gv_cnt_val_incomp  TO txt_val_inc.   CONDENSE txt_val_inc.
+*  WRITE gv_cnt_val_err     TO txt_val_err.   CONDENSE txt_val_err.
+*  WRITE gv_cnt_suc_comp    TO txt_suc_comp.  CONDENSE txt_suc_comp.
+*  WRITE gv_cnt_suc_incomp  TO txt_suc_inc.   CONDENSE txt_suc_inc.
+*  WRITE gv_cnt_fail_err    TO txt_fail_err.  CONDENSE txt_fail_err.
+
+    " Convert số sang text và XÓA KHOẢNG TRẮNG
+  WRITE gv_cnt_val_ready   TO txt_val_rdy.   CONDENSE txt_val_rdy NO-GAPS.
+  WRITE gv_cnt_val_incomp  TO txt_val_inc.   CONDENSE txt_val_inc NO-GAPS.
+  WRITE gv_cnt_val_err     TO txt_val_err.   CONDENSE txt_val_err NO-GAPS.
+
+  " [FIX LỖI LỆCH SỐ]: Thêm NO-GAPS
+  WRITE gv_cnt_suc_comp    TO txt_suc_comp.  CONDENSE txt_suc_comp NO-GAPS.
+  WRITE gv_cnt_suc_incomp  TO txt_suc_inc.   CONDENSE txt_suc_inc NO-GAPS.
+  WRITE gv_cnt_fail_err    TO txt_fail_err.  CONDENSE txt_fail_err NO-GAPS.
 
   CLEAR lv_html.
 
@@ -7733,6 +8053,102 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form HIGHLIGHT_ERROR_CELLS (Fix Mapping & Separation)
 *&---------------------------------------------------------------------*
+*FORM highlight_error_cells.
+*  DATA: lt_error_log TYPE TABLE OF ztb_so_error_log,
+*        ls_color     TYPE lvc_s_scol.
+*  DATA: lv_fname_log TYPE fieldname,
+*        lv_fname_alv TYPE fieldname.
+*
+*  " 1. Lấy log
+*  SELECT * FROM ztb_so_error_log INTO TABLE lt_error_log WHERE req_id = gv_current_req_id.
+*  IF lt_error_log IS INITIAL. RETURN. ENDIF.
+*
+*  " 2. Macro Tô màu
+*  DEFINE _set_color.
+*    CLEAR ls_color.
+*    ls_color-fname = &1.
+*    IF &2 = 'E'.
+*      ls_color-color-col = 6. " Đỏ
+*    ELSE.
+*      ls_color-color-col = 3. " Vàng
+*    ENDIF.
+*    ls_color-color-int = 1.
+*
+*    " Insert vào CELLTAB (Tránh trùng)
+*    READ TABLE &3-celltab TRANSPORTING NO FIELDS WITH KEY fname = ls_color-fname.
+*    IF sy-subrc <> 0.
+*       INSERT ls_color INTO TABLE &3-celltab.
+*    ENDIF.
+*  END-OF-DEFINITION.
+*
+*  " 3. Duyệt lỗi
+*  LOOP AT lt_error_log ASSIGNING FIELD-SYMBOL(<fs_err>).
+*    lv_fname_log = <fs_err>-fieldname.
+*
+*    " [QUAN TRỌNG]: Reset tên ALV về giống tên Log trước
+*    lv_fname_alv = lv_fname_log.
+*
+*    " =========================================================
+*    " A. XỬ LÝ MAPPING TÊN TRƯỜNG (Sửa lỗi Material không đỏ)
+*    " =========================================================
+*    IF lv_fname_log = 'REQUEST_DEV_DATE'. lv_fname_alv = 'REQ_DATE'.      ENDIF.
+*    IF lv_fname_log = 'SALES_CHANNEL'.    lv_fname_alv = 'SALES_CHANNEL'. ENDIF.
+*
+*    " [FIX LỖI 1]: Không đổi MATERIAL thành MATNR nữa (vì ALV giờ dùng MATERIAL)
+*    IF lv_fname_log = 'MATERIAL'.         lv_fname_alv = 'MATERIAL'.      ENDIF.
+*
+*    IF lv_fname_log = 'UNIT'.             lv_fname_alv = 'UOM'.           ENDIF.
+*
+*    " =========================================================
+*    " B. PHÂN LOẠI BẢNG CẦN TÔ MÀU (Sửa lỗi Condition bị tô oan)
+*    " =========================================================
+*
+*    " CASE 1: Lỗi HEADER (Item = 000000)
+*    IF <fs_err>-item_no = '000000' OR <fs_err>-item_no IS INITIAL.
+*      " Chỉ tô màu bảng Header (Validated & Failed)
+*      READ TABLE gt_hd_val ASSIGNING FIELD-SYMBOL(<fs_h_val>) WITH KEY temp_id = <fs_err>-temp_id.
+*      IF sy-subrc = 0. _set_color lv_fname_alv <fs_err>-msg_type <fs_h_val>. ENDIF.
+*
+*      READ TABLE gt_hd_fail ASSIGNING FIELD-SYMBOL(<fs_h_fail>) WITH KEY temp_id = <fs_err>-temp_id.
+*      IF sy-subrc = 0. _set_color lv_fname_alv <fs_err>-msg_type <fs_h_fail>. ENDIF.
+*
+*      " CASE 2: Lỗi ITEM/CONDITION (Item <> 0)
+*    ELSE.
+*      " Kiểm tra xem tên trường thuộc nhóm nào?
+*      IF lv_fname_log = 'COND_TYPE' OR lv_fname_log = 'AMOUNT' OR
+*         lv_fname_log = 'CURRENCY'  OR lv_fname_log = 'PER'    OR
+*         lv_fname_log = 'UOM'.
+*
+*        " >>> ĐÂY LÀ LỖI CONDITION <<<
+*        " Chỉ tô màu bảng Condition
+*        LOOP AT gt_pr_val ASSIGNING FIELD-SYMBOL(<fs_p_val>)
+*             WHERE temp_id = <fs_err>-temp_id AND item_no = <fs_err>-item_no.
+*          _set_color lv_fname_alv <fs_err>-msg_type <fs_p_val>.
+*        ENDLOOP.
+*
+*        LOOP AT gt_pr_fail ASSIGNING FIELD-SYMBOL(<fs_p_fail>)
+*             WHERE temp_id = <fs_err>-temp_id AND item_no = <fs_err>-item_no.
+*          _set_color lv_fname_alv <fs_err>-msg_type <fs_p_fail>.
+*        ENDLOOP.
+*
+*      ELSE.
+*        " >>> ĐÂY LÀ LỖI ITEM (Material, Qty, Plant...) <<<
+*        " Chỉ tô màu bảng Item (TUYỆT ĐỐI KHÔNG ĐỤNG VÀO CONDITION)
+*
+*        READ TABLE gt_it_val ASSIGNING FIELD-SYMBOL(<fs_i_val>)
+*             WITH KEY temp_id = <fs_err>-temp_id item_no = <fs_err>-item_no.
+*        IF sy-subrc = 0. _set_color lv_fname_alv <fs_err>-msg_type <fs_i_val>. ENDIF.
+*
+*        READ TABLE gt_it_fail ASSIGNING FIELD-SYMBOL(<fs_i_fail>)
+*             WITH KEY temp_id = <fs_err>-temp_id item_no = <fs_err>-item_no.
+*        IF sy-subrc = 0. _set_color lv_fname_alv <fs_err>-msg_type <fs_i_fail>. ENDIF.
+*
+*      ENDIF.
+*    ENDIF.
+*  ENDLOOP.
+*ENDFORM.
+
+"chú ý 2
 FORM highlight_error_cells.
   DATA: lt_error_log TYPE TABLE OF ztb_so_error_log,
         ls_color     TYPE lvc_s_scol.
@@ -7828,106 +8244,255 @@ FORM highlight_error_cells.
   ENDLOOP.
 ENDFORM.
 
+FORM highlight_success_cells.
+
+  DATA: ls_color       TYPE lvc_s_scol,
+        lv_has_warning TYPE abap_bool.
+
+  " Macro thêm màu
+  DEFINE _add_color.
+    CLEAR ls_color.
+    ls_color-fname     = &1.
+    ls_color-color-col = &2. " 3=Vàng, 5=Xanh
+    ls_color-color-int = 1.
+    INSERT ls_color INTO TABLE &3-celltab.
+  END-OF-DEFINITION.
+
+  " Duyệt qua bảng Header Success
+  LOOP AT gt_hd_suc ASSIGNING FIELD-SYMBOL(<fs_hd>).
+
+    REFRESH <fs_hd>-celltab.
+    CLEAR lv_has_warning.
+
+    " 1. Kiểm tra xem có Log Warning (Incomplete) trong DB không?
+    SELECT SINGLE @abap_true
+      INTO @lv_has_warning
+      FROM ztb_so_error_log
+      WHERE req_id   = @<fs_hd>-req_id
+        AND temp_id  = @<fs_hd>-temp_id
+        AND msg_type = 'W'. " W = Warning (Incomplete)
+
+    " 2. Quyết định màu sắc
+    IF lv_has_warning = abap_true.
+       " === TRƯỜNG HỢP: INCOMPLETE (VÀNG) ===
+       <fs_hd>-icon = icon_led_yellow.
+
+       " Tô Vàng ô Sales Order (Cảnh báo)
+       _add_color 'VBELN_SO' 3 <fs_hd>.
+
+       " Hiện nút Log để user xem chi tiết thiếu gì
+       <fs_hd>-err_btn = icon_protocol.
+
+    ELSE.
+       " === TRƯỜNG HỢP: COMPLETE (XANH) ===
+       <fs_hd>-icon = icon_led_green.
+
+       " Tô Xanh ô Sales Order
+       _add_color 'VBELN_SO' 5 <fs_hd>.
+
+       " Nếu có Delivery thì tô xanh luôn Delivery cho đẹp (không bắt buộc)
+       IF <fs_hd>-vbeln_dlv IS NOT INITIAL.
+         _add_color 'VBELN_DLV' 5 <fs_hd>.
+       ENDIF.
+
+       " Ẩn nút Log
+       <fs_hd>-err_btn = ' '.
+    ENDIF.
+
+    " Đồng bộ Icon cho Item/Cond con
+    LOOP AT gt_it_suc ASSIGNING FIELD-SYMBOL(<fs_it>) WHERE temp_id = <fs_hd>-temp_id.
+      <fs_it>-icon = <fs_hd>-icon.
+    ENDLOOP.
+
+    LOOP AT gt_pr_suc ASSIGNING FIELD-SYMBOL(<fs_pr>) WHERE temp_id = <fs_hd>-temp_id.
+      <fs_pr>-icon = <fs_hd>-icon.
+    ENDLOOP.
+
+  ENDLOOP.
+
+ENDFORM.
+
+
 *&---------------------------------------------------------------------*
 *& Form SAVE_RAW_TO_STAGING (Đã sửa lỗi DELETE và Tên Bảng)
 *&---------------------------------------------------------------------*
+*FORM save_raw_to_staging
+*  USING
+*    iv_mode       TYPE c
+*    iv_req_id_new TYPE zsd_req_id
+*    it_header_raw TYPE STANDARD TABLE
+*    it_item_raw   TYPE STANDARD TABLE
+*    it_cond_raw   TYPE STANDARD TABLE. " [MỚI]
+*
+*  " (SỬA: Dùng tên bảng đúng HD/IT)
+*  DATA: ls_header    TYPE ztb_so_upload_hd,
+*        ls_item      TYPE ztb_so_upload_it,
+*        lt_header_db TYPE TABLE OF ztb_so_upload_hd,
+*        lt_item_db   TYPE TABLE OF ztb_so_upload_it.
+*  DATA: ls_cond    TYPE ztb_so_upload_pr,
+*        lt_cond_db TYPE TABLE OF ztb_so_upload_pr.
+*
+*  DATA: lt_req_ids_to_delete TYPE TABLE OF zsd_req_id.
+*  " (THÊM: Biến Range để xóa dữ liệu)
+*  DATA: lr_req_id    TYPE RANGE OF zsd_req_id,
+*        ls_req_range LIKE LINE OF lr_req_id.
+*
+*  " 1. Chuẩn bị dữ liệu Header
+*  LOOP AT it_header_raw ASSIGNING FIELD-SYMBOL(<fs_h>).
+*    MOVE-CORRESPONDING <fs_h> TO ls_header.
+*
+*    IF iv_mode = 'NEW'.
+*      ls_header-req_id = iv_req_id_new.
+*    ELSE.
+*      " Resubmit: Lấy ID từ file, đưa vào danh sách xóa
+*      APPEND ls_header-req_id TO lt_req_ids_to_delete.
+*    ENDIF.
+*
+*    ls_header-status = 'NEW'.
+*    ls_header-created_by = sy-uname.
+*    ls_header-created_on = sy-datum.
+*    APPEND ls_header TO lt_header_db.
+*  ENDLOOP.
+*
+*  " 2. Chuẩn bị dữ liệu Item
+*  LOOP AT it_item_raw ASSIGNING FIELD-SYMBOL(<fs_i>).
+*    MOVE-CORRESPONDING <fs_i> TO ls_item.
+*
+*    IF iv_mode = 'NEW'.
+*      ls_item-req_id = iv_req_id_new.
+*    ELSE.
+*      APPEND ls_item-req_id TO lt_req_ids_to_delete.
+*    ENDIF.
+*
+*    ls_item-status = 'NEW'.
+*    ls_item-created_by = sy-uname.
+*    ls_item-created_on = sy-datum.
+*    APPEND ls_item TO lt_item_db.
+*  ENDLOOP.
+*
+*  " --- 3. Chuẩn bị dữ liệu Condition ---
+*  LOOP AT it_cond_raw ASSIGNING FIELD-SYMBOL(<fs_c>).
+*    MOVE-CORRESPONDING <fs_c> TO ls_cond.
+*    IF iv_mode = 'NEW'.
+*      ls_cond-req_id = iv_req_id_new.
+*    ENDIF.
+*    ls_cond-status = 'NEW'.
+*    ls_cond-created_by = sy-uname.
+*    ls_cond-created_on = sy-datum.
+*    APPEND ls_cond TO lt_cond_db.
+*  ENDLOOP.
+*
+*  " --- 4. Xóa data cũ (Resubmit) ---
+*  IF iv_mode = 'RESUBMIT'.
+*    SORT lt_req_ids_to_delete.
+*    DELETE ADJACENT DUPLICATES FROM lt_req_ids_to_delete.
+*
+*    IF lt_req_ids_to_delete IS NOT INITIAL.
+*      " Tạo Range Table (WHERE req_id IN ...)
+*      REFRESH lr_req_id.
+*      ls_req_range-sign   = 'I'.
+*      ls_req_range-option = 'EQ'.
+*      LOOP AT lt_req_ids_to_delete INTO DATA(lv_del_id).
+*        ls_req_range-low = lv_del_id.
+*        APPEND ls_req_range TO lr_req_id.
+*      ENDLOOP.
+*
+*      " Thực hiện xóa bằng Range (Cú pháp chuẩn)
+*      DELETE FROM ztb_so_upload_hd WHERE req_id IN @lr_req_id.
+*      DELETE FROM ztb_so_upload_it WHERE req_id IN @lr_req_id.
+*      DELETE FROM ztb_so_upload_pr WHERE req_id IN @lr_req_id.
+*      DELETE FROM ztb_so_error_log WHERE req_id IN @lr_req_id.
+*    ENDIF.
+*  ENDIF.
+*
+*  " 4. Insert mới (SỬA: Tên bảng HD/IT)
+*  INSERT ztb_so_upload_hd FROM TABLE @lt_header_db.
+*  INSERT ztb_so_upload_it FROM TABLE @lt_item_db.
+*  INSERT ztb_so_upload_pr FROM TABLE @lt_cond_db. " [MỚI]
+*
+*  COMMIT WORK.
+*
+*  MESSAGE |Data saved to Staging. { lines( lt_header_db ) } Headers, { lines( lt_item_db ) } Items.| TYPE 'S'.
+*ENDFORM.
+
 FORM save_raw_to_staging
   USING
     iv_mode       TYPE c
     iv_req_id_new TYPE zsd_req_id
     it_header_raw TYPE STANDARD TABLE
     it_item_raw   TYPE STANDARD TABLE
-    it_cond_raw   TYPE STANDARD TABLE. " [MỚI]
+    it_cond_raw   TYPE STANDARD TABLE.
 
-  " (SỬA: Dùng tên bảng đúng HD/IT)
-  DATA: ls_header TYPE ztb_so_upload_hd,
-        ls_item   TYPE ztb_so_upload_it,
+  DATA: ls_header_db TYPE ztb_so_upload_hd,
         lt_header_db TYPE TABLE OF ztb_so_upload_hd,
-        lt_item_db   TYPE TABLE OF ztb_so_upload_it.
-  DATA: ls_cond TYPE ztb_so_upload_pr,
-        lt_cond_db TYPE TABLE OF ztb_so_upload_pr.
+        ls_item_db   TYPE ztb_so_upload_it,
+        lt_item_db   TYPE TABLE OF ztb_so_upload_it,
+        ls_cond      TYPE ztb_so_upload_pr,
+        lt_cond_db   TYPE TABLE OF ztb_so_upload_pr.
 
-  DATA: lt_req_ids_to_delete TYPE TABLE OF zsd_req_id.
-  " (THÊM: Biến Range để xóa dữ liệu)
-  DATA: lr_req_id TYPE RANGE OF zsd_req_id,
+  DATA: lr_req_id    TYPE RANGE OF zsd_req_id,
         ls_req_range LIKE LINE OF lr_req_id.
 
-  " 1. Chuẩn bị dữ liệu Header
+  " --- 1. Xử lý Header & Item (Giữ nguyên logic cũ của bạn) ---
   LOOP AT it_header_raw ASSIGNING FIELD-SYMBOL(<fs_h>).
-    MOVE-CORRESPONDING <fs_h> TO ls_header.
+    MOVE-CORRESPONDING <fs_h> TO ls_header_db.
+    IF iv_mode = 'NEW'. ls_header_db-req_id = iv_req_id_new. ENDIF.
+    ls_header_db-status = 'NEW'.
+    ls_header_db-created_by = sy-uname.
+    ls_header_db-created_on = sy-datum.
+    APPEND ls_header_db TO lt_header_db.
 
-    IF iv_mode = 'NEW'.
-      ls_header-req_id = iv_req_id_new.
-    ELSE.
-      " Resubmit: Lấy ID từ file, đưa vào danh sách xóa
-      APPEND ls_header-req_id TO lt_req_ids_to_delete.
-    ENDIF.
-
-    ls_header-status = 'NEW'.
-    ls_header-created_by = sy-uname.
-    ls_header-created_on = sy-datum.
-    APPEND ls_header TO lt_header_db.
+    " Collect REQ_ID để xóa cũ nếu cần
+    ls_req_range-sign = 'I'. ls_req_range-option = 'EQ'. ls_req_range-low = ls_header_db-req_id.
+    COLLECT ls_req_range INTO lr_req_id.
   ENDLOOP.
 
-  " 2. Chuẩn bị dữ liệu Item
   LOOP AT it_item_raw ASSIGNING FIELD-SYMBOL(<fs_i>).
-    MOVE-CORRESPONDING <fs_i> TO ls_item.
-
-    IF iv_mode = 'NEW'.
-      ls_item-req_id = iv_req_id_new.
-    ELSE.
-      APPEND ls_item-req_id TO lt_req_ids_to_delete.
-    ENDIF.
-
-    ls_item-status = 'NEW'.
-    ls_item-created_by = sy-uname.
-    ls_item-created_on = sy-datum.
-    APPEND ls_item TO lt_item_db.
+    MOVE-CORRESPONDING <fs_i> TO ls_item_db.
+    IF iv_mode = 'NEW'. ls_item_db-req_id = iv_req_id_new. ENDIF.
+    ls_item_db-status = 'NEW'.
+    ls_item_db-created_by = sy-uname.
+    ls_item_db-created_on = sy-datum.
+    APPEND ls_item_db TO lt_item_db.
   ENDLOOP.
 
-  " --- 3. Chuẩn bị dữ liệu Condition ---
+  " --- 2. Xử lý Condition (SỬA LỖI COUNTER TẠI ĐÂY) ---
   LOOP AT it_cond_raw ASSIGNING FIELD-SYMBOL(<fs_c>).
     MOVE-CORRESPONDING <fs_c> TO ls_cond.
+
     IF iv_mode = 'NEW'.
        ls_cond-req_id = iv_req_id_new.
     ENDIF.
-    ls_cond-status = 'NEW'.
+
+    " [FIX QUAN TRỌNG]: Tự động đánh số Counter theo thứ tự vòng lặp
+    " Đảm bảo mỗi dòng có 1 số duy nhất (1, 2, 3...) -> Không bao giờ trùng khóa
+    ls_cond-counter    = sy-tabix.
+
+    ls_cond-status     = 'NEW'.
     ls_cond-created_by = sy-uname.
     ls_cond-created_on = sy-datum.
     APPEND ls_cond TO lt_cond_db.
   ENDLOOP.
 
-  " --- 4. Xóa data cũ (Resubmit) ---
-  IF iv_mode = 'RESUBMIT'.
-    SORT lt_req_ids_to_delete.
-    DELETE ADJACENT DUPLICATES FROM lt_req_ids_to_delete.
-
-    IF lt_req_ids_to_delete IS NOT INITIAL.
-      " Tạo Range Table (WHERE req_id IN ...)
-      REFRESH lr_req_id.
-      ls_req_range-sign   = 'I'.
-      ls_req_range-option = 'EQ'.
-      LOOP AT lt_req_ids_to_delete INTO DATA(lv_del_id).
-        ls_req_range-low = lv_del_id.
-        APPEND ls_req_range TO lr_req_id.
-      ENDLOOP.
-
-      " Thực hiện xóa bằng Range (Cú pháp chuẩn)
-      DELETE FROM ztb_so_upload_hd WHERE req_id IN @lr_req_id.
-      DELETE FROM ztb_so_upload_it WHERE req_id IN @lr_req_id.
-      DELETE FROM ztb_so_upload_pr WHERE req_id IN @lr_req_id.
-      DELETE FROM ztb_so_error_log WHERE req_id IN @lr_req_id.
-    ENDIF.
+  " --- 3. Xóa dữ liệu cũ (Nếu Resubmit) ---
+  IF iv_mode = 'RESUBMIT' AND lr_req_id IS NOT INITIAL.
+     DELETE FROM ztb_so_upload_hd WHERE req_id IN lr_req_id.
+     DELETE FROM ztb_so_upload_it WHERE req_id IN lr_req_id.
+     DELETE FROM ztb_so_upload_pr WHERE req_id IN lr_req_id.
   ENDIF.
 
-  " 4. Insert mới (SỬA: Tên bảng HD/IT)
-  INSERT ztb_so_upload_hd FROM TABLE @lt_header_db.
-  INSERT ztb_so_upload_it FROM TABLE @lt_item_db.
-  INSERT ztb_so_upload_pr FROM TABLE @lt_cond_db. " [MỚI]
+  " --- 4. Lưu xuống DB (Dùng MODIFY để tránh Dump) ---
+  IF lt_header_db IS NOT INITIAL. MODIFY ztb_so_upload_hd FROM TABLE lt_header_db. ENDIF.
+  IF lt_item_db   IS NOT INITIAL. MODIFY ztb_so_upload_it FROM TABLE lt_item_db.   ENDIF.
+
+  " [FIX QUAN TRỌNG]: Dùng MODIFY thay vì INSERT
+  IF lt_cond_db   IS NOT INITIAL.
+     MODIFY ztb_so_upload_pr FROM TABLE lt_cond_db.
+  ENDIF.
 
   COMMIT WORK.
+  MESSAGE 'Data saved to Staging successfully.' TYPE 'S'.
 
-  MESSAGE |Data saved to Staging. { lines( lt_header_db ) } Headers, { lines( lt_item_db ) } Items.| TYPE 'S'.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -7936,34 +8501,257 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form VALIDATE_STAGING_DATA (Header + Item + Pricing)
 *&---------------------------------------------------------------------*
+*FORM validate_staging_data USING iv_req_id TYPE zsd_req_id.
+*
+*  DATA: lt_header TYPE TABLE OF ztb_so_upload_hd,
+*        lt_item   TYPE TABLE OF ztb_so_upload_it,
+*        lt_cond   TYPE TABLE OF ztb_so_upload_pr. " [MỚI] Bảng Pricing
+*
+*  DATA: lt_errors_total TYPE ztty_validation_error.
+*
+*  " --- 1. Đọc dữ liệu từ Staging ---
+*  SELECT * FROM ztb_so_upload_hd INTO TABLE lt_header WHERE req_id = iv_req_id.
+*
+*  IF sy-subrc <> 0.
+*    MESSAGE 'No data found in Staging table to validate.' TYPE 'S' DISPLAY LIKE 'E'.
+*    EXIT.
+*  ENDIF.
+*
+*  SELECT * FROM ztb_so_upload_it INTO TABLE lt_item WHERE req_id = iv_req_id.
+*  SELECT * FROM ztb_so_upload_pr INTO TABLE lt_cond WHERE req_id = iv_req_id. " [MỚI]
+*
+*  " --- 2. Thiết lập Class Validator ---
+*  " Truyền REQ_ID vào context và xóa lỗi cũ
+*  CALL METHOD zcl_sd_mass_validator=>set_context( iv_req_id ).
+*  CALL METHOD zcl_sd_mass_validator=>clear_errors.
+*
+*  " ====================================================================
+*  " A. VALIDATE HEADER
+*  " ====================================================================
+*  LOOP AT lt_header ASSIGNING FIELD-SYMBOL(<fs_header>).
+*    CALL METHOD zcl_sd_mass_validator=>execute_validation_hdr
+*      CHANGING cs_header = <fs_header>.
+*
+*    UPDATE ztb_so_upload_hd FROM <fs_header>.
+*  ENDLOOP.
+*
+*  " ====================================================================
+*  " B. VALIDATE ITEM
+*  " ====================================================================
+*  LOOP AT lt_item ASSIGNING FIELD-SYMBOL(<fs_item>).
+*
+*    " Tìm Header cha
+*    READ TABLE lt_header ASSIGNING FIELD-SYMBOL(<fs_header_parent>)
+*      WITH KEY temp_id = <fs_item>-temp_id.
+*
+*    IF sy-subrc <> 0.
+*      " Mất Header -> Lỗi Item
+*      <fs_item>-status  = 'ERROR'.
+*      <fs_item>-message = 'Parent Header missing.'.
+*
+*      CALL METHOD zcl_sd_mass_validator=>add_error
+*        EXPORTING
+*          iv_temp_id   = <fs_item>-temp_id
+*          iv_item_no   = <fs_item>-item_no
+*          iv_fieldname = 'TEMP_ID'
+*          iv_msg_type  = 'E'
+*          iv_message   = 'Parent Header missing.'.
+*
+*      UPDATE ztb_so_upload_it FROM <fs_item>.
+*      CONTINUE.
+*    ENDIF.
+*
+*    " Gọi Validate Item
+*    CALL METHOD zcl_sd_mass_validator=>execute_validation_itm
+*       EXPORTING is_header = <fs_header_parent>
+*       CHANGING  cs_item   = <fs_item>.
+*
+*    UPDATE ztb_so_upload_it FROM <fs_item>.
+*  ENDLOOP.
+*
+*  " ====================================================================
+*  " C. VALIDATE CONDITION [MỚI]
+*  " ====================================================================
+*  LOOP AT lt_cond ASSIGNING FIELD-SYMBOL(<fs_cond>).
+*
+*    " (Tùy chọn: Kiểm tra xem Item cha có tồn tại không, tương tự như Item check Header)
+*    " Ở đây ta gọi validate trực tiếp
+*
+*    CALL METHOD zcl_sd_mass_validator=>execute_validation_prc
+*      CHANGING cs_pricing = <fs_cond>.
+*
+*    UPDATE ztb_so_upload_pr FROM <fs_cond>.
+*  ENDLOOP.
+*
+*  " ====================================================================
+*  " D. LƯU LOG & COMMIT
+*  " ====================================================================
+*  " Lấy TẤT CẢ lỗi (Header + Item + Condition) từ Class
+*  lt_errors_total = zcl_sd_mass_validator=>get_errors( ).
+*
+*  " Lưu vào bảng ZTB_SO_ERROR_LOG
+*  CALL METHOD zcl_sd_mass_logger=>save_errors_to_db
+*    EXPORTING
+*      it_errors = lt_errors_total.
+*
+*  COMMIT WORK.
+*
+*ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form VALIDATE_STAGING_DATA (Fix: Skip SUCCESS records)
+*&---------------------------------------------------------------------*
+*FORM validate_staging_data USING iv_req_id TYPE zsd_req_id.
+*
+*  DATA: lt_header TYPE TABLE OF ztb_so_upload_hd,
+*        lt_item   TYPE TABLE OF ztb_so_upload_it,
+*        lt_cond   TYPE TABLE OF ztb_so_upload_pr.
+*
+*  DATA: lt_errors_total TYPE ztty_validation_error.
+*
+*  " --- 1. Đọc dữ liệu từ Staging ---
+*  SELECT * FROM ztb_so_upload_hd INTO TABLE lt_header WHERE req_id = iv_req_id.
+*  IF sy-subrc <> 0. EXIT. ENDIF.
+*
+*  SELECT * FROM ztb_so_upload_it INTO TABLE lt_item WHERE req_id = iv_req_id.
+*  SELECT * FROM ztb_so_upload_pr INTO TABLE lt_cond WHERE req_id = iv_req_id.
+*
+*  " --- 2. Thiết lập Class Validator ---
+*  CALL METHOD zcl_sd_mass_validator=>set_context( iv_req_id ).
+*  CALL METHOD zcl_sd_mass_validator=>clear_errors.
+*
+*  " ====================================================================
+*  " A. VALIDATE HEADER
+*  " ====================================================================
+*  LOOP AT lt_header ASSIGNING FIELD-SYMBOL(<fs_header>).
+*
+*    " [FIX QUAN TRỌNG]: Nếu đã thành công rồi thì BỎ QUA, không validate lại
+*    IF <fs_header>-status = 'SUCCESS'.
+*      CONTINUE.
+*    ENDIF.
+*
+*    CALL METHOD zcl_sd_mass_validator=>execute_validation_hdr
+*      CHANGING
+*        cs_header = <fs_header>.
+*
+*    UPDATE ztb_so_upload_hd FROM <fs_header>.
+*  ENDLOOP.
+*
+*  " ====================================================================
+*  " B. VALIDATE ITEM
+*  " ====================================================================
+*  LOOP AT lt_item ASSIGNING FIELD-SYMBOL(<fs_item>).
+*
+*    " Tìm Header cha
+*    READ TABLE lt_header ASSIGNING FIELD-SYMBOL(<fs_header_parent>)
+*      WITH KEY temp_id = <fs_item>-temp_id.
+*
+*    " [FIX QUAN TRỌNG]: Nếu Header cha đã SUCCESS -> Item con cũng BỎ QUA
+*    IF sy-subrc = 0 AND <fs_header_parent>-status = 'SUCCESS'.
+*      CONTINUE.
+*    ENDIF.
+*
+*    " Xử lý mất Header
+*    IF sy-subrc <> 0.
+*      <fs_item>-status  = 'ERROR'.
+*      <fs_item>-message = 'Parent Header missing.'.
+*      CALL METHOD zcl_sd_mass_validator=>add_error
+*        EXPORTING
+*          iv_temp_id   = <fs_item>-temp_id
+*          iv_item_no   = <fs_item>-item_no
+*          iv_fieldname = 'TEMP_ID'
+*          iv_msg_type  = 'E'
+*          iv_message   = 'Parent Header missing.'.
+*      UPDATE ztb_so_upload_it FROM <fs_item>.
+*      CONTINUE.
+*    ENDIF.
+*
+*    " Gọi Validate Item
+*    CALL METHOD zcl_sd_mass_validator=>execute_validation_itm
+*      EXPORTING
+*        is_header = <fs_header_parent>
+*      CHANGING
+*        cs_item   = <fs_item>.
+*
+*    UPDATE ztb_so_upload_it FROM <fs_item>.
+*  ENDLOOP.
+*
+*  " ====================================================================
+*  " C. VALIDATE CONDITION
+*  " ====================================================================
+*  LOOP AT lt_cond ASSIGNING FIELD-SYMBOL(<fs_cond>).
+*
+*    " [FIX QUAN TRỌNG]: Tìm Header cha để check status SUCCESS
+*    READ TABLE lt_header ASSIGNING <fs_header_parent>
+*      WITH KEY temp_id = <fs_cond>-temp_id.
+*
+*    IF sy-subrc = 0 AND <fs_header_parent>-status = 'SUCCESS'.
+*      CONTINUE. " Bỏ qua dòng này
+*    ENDIF.
+*
+*    CALL METHOD zcl_sd_mass_validator=>execute_validation_prc
+*      CHANGING
+*        cs_pricing = <fs_cond>.
+*
+*    UPDATE ztb_so_upload_pr FROM <fs_cond>.
+*  ENDLOOP.
+*
+*  " ====================================================================
+*  " D. LƯU LOG & COMMIT
+*  " ====================================================================
+*  lt_errors_total = zcl_sd_mass_validator=>get_errors( ).
+*
+*  CALL METHOD zcl_sd_mass_logger=>save_errors_to_db
+*    EXPORTING
+*      it_errors = lt_errors_total.
+*
+*  COMMIT WORK.
+*
+*ENDFORM.
+
+"chú ý 2
 FORM validate_staging_data USING iv_req_id TYPE zsd_req_id.
 
   DATA: lt_header TYPE TABLE OF ztb_so_upload_hd,
         lt_item   TYPE TABLE OF ztb_so_upload_it,
-        lt_cond   TYPE TABLE OF ztb_so_upload_pr. " [MỚI] Bảng Pricing
+        lt_cond   TYPE TABLE OF ztb_so_upload_pr.
 
   DATA: lt_errors_total TYPE ztty_validation_error.
+  DATA: lr_temp_id_reval TYPE RANGE OF char10.
 
   " --- 1. Đọc dữ liệu từ Staging ---
   SELECT * FROM ztb_so_upload_hd INTO TABLE lt_header WHERE req_id = iv_req_id.
-
-  IF sy-subrc <> 0.
-    MESSAGE 'No data found in Staging table to validate.' TYPE 'S' DISPLAY LIKE 'E'.
-    EXIT.
-  ENDIF.
+  IF sy-subrc <> 0. EXIT. ENDIF.
 
   SELECT * FROM ztb_so_upload_it INTO TABLE lt_item WHERE req_id = iv_req_id.
-  SELECT * FROM ztb_so_upload_pr INTO TABLE lt_cond WHERE req_id = iv_req_id. " [MỚI]
+  SELECT * FROM ztb_so_upload_pr INTO TABLE lt_cond WHERE req_id = iv_req_id.
 
   " --- 2. Thiết lập Class Validator ---
-  " Truyền REQ_ID vào context và xóa lỗi cũ
   CALL METHOD zcl_sd_mass_validator=>set_context( iv_req_id ).
   CALL METHOD zcl_sd_mass_validator=>clear_errors.
+
+  " ====================================================================
+  " [FIX QUAN TRỌNG]: DỌN DẸP LOG CŨ CỦA CÁC DÒNG SẮP RE-VALIDATE
+  " ====================================================================
+  " Chỉ xóa log của những dòng KHÔNG PHẢI LÀ SUCCESS (vì Success không validate lại)
+  LOOP AT lt_header INTO DATA(ls_hd_chk) WHERE status <> 'SUCCESS'.
+    APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_hd_chk-temp_id ) TO lr_temp_id_reval.
+  ENDLOOP.
+
+  IF lr_temp_id_reval IS NOT INITIAL.
+    " Xóa sạch lỗi cũ trong DB để tránh tô màu 'bóng ma'
+    DELETE FROM ztb_so_error_log
+      WHERE req_id = iv_req_id
+        AND temp_id IN lr_temp_id_reval.
+    COMMIT WORK. " Commit việc xóa ngay
+  ENDIF.
 
   " ====================================================================
   " A. VALIDATE HEADER
   " ====================================================================
   LOOP AT lt_header ASSIGNING FIELD-SYMBOL(<fs_header>).
+    " Bỏ qua dòng đã thành công
+    IF <fs_header>-status = 'SUCCESS'. CONTINUE. ENDIF.
+
     CALL METHOD zcl_sd_mass_validator=>execute_validation_hdr
       CHANGING cs_header = <fs_header>.
 
@@ -7974,16 +8762,19 @@ FORM validate_staging_data USING iv_req_id TYPE zsd_req_id.
   " B. VALIDATE ITEM
   " ====================================================================
   LOOP AT lt_item ASSIGNING FIELD-SYMBOL(<fs_item>).
-
-    " Tìm Header cha
+    " Tìm Header cha để check status
     READ TABLE lt_header ASSIGNING FIELD-SYMBOL(<fs_header_parent>)
       WITH KEY temp_id = <fs_item>-temp_id.
 
+    " Nếu Header cha đã Success -> Bỏ qua Item con
+    IF sy-subrc = 0 AND <fs_header_parent>-status = 'SUCCESS'.
+       CONTINUE.
+    ENDIF.
+
     IF sy-subrc <> 0.
-      " Mất Header -> Lỗi Item
+      " Mất Header -> Lỗi
       <fs_item>-status  = 'ERROR'.
       <fs_item>-message = 'Parent Header missing.'.
-
       CALL METHOD zcl_sd_mass_validator=>add_error
         EXPORTING
           iv_temp_id   = <fs_item>-temp_id
@@ -7991,7 +8782,6 @@ FORM validate_staging_data USING iv_req_id TYPE zsd_req_id.
           iv_fieldname = 'TEMP_ID'
           iv_msg_type  = 'E'
           iv_message   = 'Parent Header missing.'.
-
       UPDATE ztb_so_upload_it FROM <fs_item>.
       CONTINUE.
     ENDIF.
@@ -8005,13 +8795,64 @@ FORM validate_staging_data USING iv_req_id TYPE zsd_req_id.
   ENDLOOP.
 
   " ====================================================================
-  " C. VALIDATE CONDITION [MỚI]
+  " C. VALIDATE CONDITION
   " ====================================================================
+*  LOOP AT lt_cond ASSIGNING FIELD-SYMBOL(<fs_cond>).
+*    READ TABLE lt_header ASSIGNING <fs_header_parent>
+*      WITH KEY temp_id = <fs_cond>-temp_id.
+*
+*    IF sy-subrc = 0 AND <fs_header_parent>-status = 'SUCCESS'.
+*       CONTINUE.
+*    ENDIF.
+*
+*    CALL METHOD zcl_sd_mass_validator=>execute_validation_prc
+*      CHANGING cs_pricing = <fs_cond>.
+*
+*    UPDATE ztb_so_upload_pr FROM <fs_cond>.
+*  ENDLOOP.
+
+   " 1. Tạo bảng phụ để đếm số lần xuất hiện
+  DATA: lt_cond_check TYPE TABLE OF ztb_so_upload_pr.
+  lt_cond_check = lt_cond.
+  SORT lt_cond_check BY temp_id item_no cond_type. " Sắp xếp để đếm
+
   LOOP AT lt_cond ASSIGNING FIELD-SYMBOL(<fs_cond>).
 
-    " (Tùy chọn: Kiểm tra xem Item cha có tồn tại không, tương tự như Item check Header)
-    " Ở đây ta gọi validate trực tiếp
+    " Check Header cha (như cũ)
+    READ TABLE lt_header ASSIGNING <fs_header_parent> WITH KEY temp_id = <fs_cond>-temp_id.
+    IF sy-subrc = 0 AND <fs_header_parent>-status = 'SUCCESS'. CONTINUE. ENDIF.
 
+    " --- [LOGIC MỚI]: CHECK DUPLICATE ---
+    DATA(lv_count) = 0.
+
+    " Đếm xem có bao nhiêu dòng cùng ID, Item và Cond Type này
+    LOOP AT lt_cond_check TRANSPORTING NO FIELDS
+         WHERE temp_id   = <fs_cond>-temp_id
+           AND item_no   = <fs_cond>-item_no
+           AND cond_type = <fs_cond>-cond_type.
+       lv_count = lv_count + 1.
+    ENDLOOP.
+
+    " Nếu xuất hiện nhiều hơn 1 lần -> LỖI CẢ ĐÁM
+    IF lv_count > 1.
+       <fs_cond>-status  = 'ERROR'.
+       <fs_cond>-message = |Duplicate Condition Type { <fs_cond>-cond_type }|.
+
+       " Ghi log lỗi
+       CALL METHOD zcl_sd_mass_validator=>add_error
+        EXPORTING
+          iv_temp_id   = <fs_cond>-temp_id
+          iv_item_no   = <fs_cond>-item_no
+          iv_fieldname = 'COND_TYPE'
+          iv_msg_type  = 'E'
+          iv_message   = 'Duplicate Condition Type found.'.
+
+       " Cập nhật DB và bỏ qua validate chi tiết (vì đã sai rồi)
+       UPDATE ztb_so_upload_pr FROM <fs_cond>.
+       CONTINUE.
+    ENDIF.
+
+    " --- Validate chi tiết (Nếu không trùng) ---
     CALL METHOD zcl_sd_mass_validator=>execute_validation_prc
       CHANGING cs_pricing = <fs_cond>.
 
@@ -8021,10 +8862,9 @@ FORM validate_staging_data USING iv_req_id TYPE zsd_req_id.
   " ====================================================================
   " D. LƯU LOG & COMMIT
   " ====================================================================
-  " Lấy TẤT CẢ lỗi (Header + Item + Condition) từ Class
   lt_errors_total = zcl_sd_mass_validator=>get_errors( ).
 
-  " Lưu vào bảng ZTB_SO_ERROR_LOG
+  " Lưu các lỗi MỚI (nếu có) vào DB
   CALL METHOD zcl_sd_mass_logger=>save_errors_to_db
     EXPORTING
       it_errors = lt_errors_total.
@@ -8036,6 +8876,36 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form LOAD_STAGING_FROM_DB (Logic RESUME - Sửa lỗi tham số)
 *&---------------------------------------------------------------------*
+*FORM load_staging_from_db USING iv_uname TYPE sy-uname.
+*
+*  DATA: lv_latest_req_id TYPE zsd_req_id.
+*
+*  " 1. Tìm Request ID mới nhất của User này mà CHƯA HOÀN THÀNH
+*  " (Status khác 'POSTED' - tức là NEW, READY, INCOMP, ERROR)
+*  SELECT MAX( req_id )
+*    FROM ztb_so_upload_hd
+*    INTO lv_latest_req_id
+*    WHERE created_by = iv_uname
+*      AND status    <> 'POSTED'. " Chỉ lấy cái chưa xong
+*
+*  " 2. Kiểm tra kết quả
+*  IF lv_latest_req_id IS INITIAL.
+*    MESSAGE 'No unfinished upload found for your user.' TYPE 'S' DISPLAY LIKE 'E'.
+*
+*    " Reset biến toàn cục để không hiển thị bậy
+*    CLEAR gv_current_req_id.
+*    gv_data_loaded = abap_false.
+*    RETURN.
+*  ENDIF.
+*
+*  " 3. Gán ID tìm được vào biến toàn cục
+*  " (Để FORM 'load_data_from_staging' sau đó sẽ dùng ID này để lấy dữ liệu chi tiết)
+*  gv_current_req_id = lv_latest_req_id.
+*
+*  MESSAGE |Resumed unfinished session: { gv_current_req_id }| TYPE 'S'.
+*
+*ENDFORM.
+
 FORM load_staging_from_db USING iv_uname TYPE sy-uname.
 
   DATA: lv_latest_req_id TYPE zsd_req_id.
@@ -8328,6 +9198,215 @@ ENDFORM.
 *&---------------------------------------------------------------------*
 *& Form LOAD_DATA_FROM_STAGING
 *&---------------------------------------------------------------------*
+*FORM load_data_from_staging USING iv_req_id TYPE zsd_req_id.
+*
+*  " 1. Refresh
+*  REFRESH: gt_hd_val, gt_it_val, gt_pr_val,
+*           gt_hd_suc, gt_it_suc, gt_pr_suc,
+*           gt_hd_fail, gt_it_fail, gt_pr_fail.
+*
+*  " 2. Read DB
+*  SELECT * FROM ztb_so_upload_hd INTO TABLE @DATA(lt_hd) WHERE req_id = @iv_req_id.
+*  IF lt_hd IS INITIAL. RETURN. ENDIF.
+*
+*  SELECT * FROM ztb_so_upload_it INTO TABLE @DATA(lt_it) WHERE req_id = @iv_req_id.
+*  SELECT * FROM ztb_so_upload_pr INTO TABLE @DATA(lt_pr) WHERE req_id = @iv_req_id.
+*
+*  " Biến tạm
+*  DATA: ls_hd_alv TYPE ty_header,
+*        ls_it_alv TYPE ty_item,
+*        ls_pr_alv TYPE ty_condition.
+*
+*  " 3. Phân loại
+*  LOOP AT lt_hd INTO DATA(ls_hd_db).
+*    CLEAR ls_hd_alv.
+*    MOVE-CORRESPONDING ls_hd_db TO ls_hd_alv.
+*
+*    CASE ls_hd_db-status.
+*
+*        " === TAB 1: VALIDATED ===
+*      WHEN 'NEW' OR 'READY' OR 'INCOMP' OR 'ERROR'.
+*
+*        " Icon & Err Btn cho Header
+*        IF ls_hd_db-status = 'ERROR'.
+*          ls_hd_alv-icon    = icon_led_red.
+*          ls_hd_alv-err_btn = icon_protocol. " [SỬA]: Dùng ls_hd_alv
+*        ELSEIF ls_hd_db-status = 'INCOMP'.
+*          ls_hd_alv-icon    = icon_led_yellow.
+*          ls_hd_alv-err_btn = icon_protocol. " [SỬA]
+*        ELSE.
+*          ls_hd_alv-icon    = icon_led_green.
+*          ls_hd_alv-err_btn = ' '.
+*        ENDIF.
+*
+*        APPEND ls_hd_alv TO gt_hd_val.
+*
+*        " --- Item ---
+*        LOOP AT lt_it INTO DATA(ls_it_db) WHERE temp_id = ls_hd_db-temp_id.
+*          CLEAR ls_it_alv.
+*          MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*
+*          " Icon & Err Btn cho Item
+*          IF ls_it_db-status = 'ERROR'.
+*            ls_it_alv-icon    = icon_led_red.
+*            ls_it_alv-err_btn = icon_protocol. " [MỚI]: Gán cho Item
+*          ELSEIF ls_it_db-status = 'INCOMP' OR ls_it_db-status = 'W'.
+*            ls_it_alv-icon    = icon_led_yellow.
+*            ls_it_alv-err_btn = icon_protocol. " [MỚI]
+*          ELSE.
+*            ls_it_alv-icon    = icon_led_green.
+*            ls_it_alv-err_btn = ' '.
+*          ENDIF.
+*
+*          APPEND ls_it_alv TO gt_it_val.
+*        ENDLOOP.
+*
+*        " --- Condition ---
+*        LOOP AT lt_pr INTO DATA(ls_pr_db) WHERE temp_id = ls_hd_db-temp_id.
+*          CLEAR ls_pr_alv.
+*          MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*
+*          " Icon & Err Btn cho Condition
+*          IF ls_pr_db-status = 'ERROR'.
+*            ls_pr_alv-icon    = icon_led_red.
+*            ls_pr_alv-err_btn = icon_protocol. " [MỚI]
+*          ELSEIF ls_pr_db-status = 'INCOMP'.
+*            ls_pr_alv-icon    = icon_led_yellow.
+*            ls_pr_alv-err_btn = icon_protocol. " [MỚI]
+*          ELSE.
+*            ls_pr_alv-icon    = icon_led_green.
+*            ls_pr_alv-err_btn = ' '.
+*          ENDIF.
+*
+*          APPEND ls_pr_alv TO gt_pr_val.
+*        ENDLOOP.
+*
+*
+**      " === TAB 2: SUCCESS ===
+**      WHEN 'SUCCESS' OR 'POSTED'.
+**        " Logic Delivery Check
+**        IF ls_hd_db-vbeln_dlv IS NOT INITIAL.
+**          ls_hd_alv-icon = icon_led_green.
+**        ELSE.
+**          ls_hd_alv-icon = icon_led_yellow.
+**        ENDIF.
+**        ls_hd_alv-err_btn = ' '. " Success không có lỗi
+**
+**        APPEND ls_hd_alv TO gt_hd_suc.
+**
+**        LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
+**           MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+**           ls_it_alv-icon = icon_led_green.
+**           ls_it_alv-err_btn = ' '.
+**           APPEND ls_it_alv TO gt_it_suc.
+**        ENDLOOP.
+**        LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
+**           MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+**           ls_pr_alv-icon = icon_led_green.
+**           ls_pr_alv-err_btn = ' '.
+**           APPEND ls_pr_alv TO gt_pr_suc.
+**        ENDLOOP.
+*
+*        " === TAB 2: SUCCESS ===
+*      WHEN 'SUCCESS' OR 'POSTED'.
+*        " Logic Delivery Check
+*        IF ls_hd_db-vbeln_dlv IS NOT INITIAL.
+*          ls_hd_alv-icon = icon_led_green.
+*          ls_hd_alv-err_btn = ' '. " Hoàn hảo -> Không cần log
+*        ELSE.
+*          " Incomplete (Thiếu Delivery hoặc SO Incomplete) -> Vàng
+*          ls_hd_alv-icon = icon_led_yellow.
+*          ls_hd_alv-err_btn = icon_protocol. " [SỬA]: Hiện nút để xem Incomplete Log
+*        ENDIF.
+*
+*        " (Nếu bạn muốn check kỹ hơn trường message xem có chữ 'Incomplete' không thì check thêm ở đây)
+*
+*        APPEND ls_hd_alv TO gt_hd_suc.
+*
+*        LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
+*          MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*          ls_it_alv-icon = icon_led_green. " Item thường xanh khi Header Success
+*          ls_it_alv-err_btn = ' '.
+*          APPEND ls_it_alv TO gt_it_suc.
+*        ENDLOOP.
+*        LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
+*          MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*          ls_pr_alv-icon = icon_led_green.
+*          ls_pr_alv-err_btn = ' '.
+*          APPEND ls_pr_alv TO gt_pr_suc.
+*        ENDLOOP.
+*
+*
+**        " === TAB 2: POSTED SUCCESS ===
+**      WHEN 'SUCCESS' OR 'POSTED'.
+**
+**        " 1. Xác định màu đèn dựa trên DB (Do perform_create đã lưu vào DB)
+**        " (Nếu trong DB đã lưu icon vàng thì lấy vàng, nếu không thì xanh)
+**        ls_hd_alv-icon = ls_hd_db-icon.
+**        IF ls_hd_alv-icon IS INITIAL. ls_hd_alv-icon = icon_led_green. ENDIF.
+**
+**        " [FIX 1]: Hiển thị nút Log nếu bị Incomplete (Vàng)
+**        IF ls_hd_alv-icon = icon_led_yellow.
+**           ls_hd_alv-err_btn = icon_protocol. " Hiện icon tờ giấy
+**
+**           " [FIX 2]: Tô màu Vàng cho ô Sales Order Number
+**           CLEAR ls_color_cell.
+**           ls_color_cell-fname     = 'VBELN_SO'.
+**           ls_color_cell-color-col = 3. " Vàng
+**           ls_color_cell-color-int = 1.
+**           INSERT ls_color_cell INTO TABLE ls_hd_alv-celltab.
+**        ELSE.
+**           ls_hd_alv-err_btn = ' '. " Xanh thì ẩn nút log
+**        ENDIF.
+**
+**        " (Logic kiểm tra Delivery cũ nếu muốn giữ kết hợp)
+**        " IF ls_hd_db-vbeln_dlv IS INITIAL AND ... -> Có thể set Vàng ở đây nếu muốn
+**
+**        APPEND ls_hd_alv TO gt_hd_suc.
+**
+**        " Xử lý Item/Cond con
+**        LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
+**           CLEAR ls_it_alv.
+**           MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+**           ls_it_alv-icon = ls_hd_alv-icon. " Item ăn theo màu Header
+**           APPEND ls_it_alv TO gt_it_suc.
+**        ENDLOOP.
+**
+**        LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
+**           CLEAR ls_pr_alv.
+**           MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+**           ls_pr_alv-icon = ls_hd_alv-icon.
+**           APPEND ls_pr_alv TO gt_pr_suc.
+**        ENDLOOP.
+*
+*
+*        " === TAB 3: FAILED ===
+*      WHEN 'FAILED'.
+*        ls_hd_alv-icon    = icon_led_red.
+*        ls_hd_alv-err_btn = icon_protocol. " [SỬA]
+*        APPEND ls_hd_alv TO gt_hd_fail.
+*
+*        LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
+*          MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*          ls_it_alv-icon    = icon_led_red.
+*          ls_it_alv-err_btn = icon_protocol. " [SỬA]: Nên hiện lỗi nếu có
+*          APPEND ls_it_alv TO gt_it_fail.
+*        ENDLOOP.
+*        LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
+*          MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*          ls_pr_alv-icon    = icon_led_red.
+*          ls_pr_alv-err_btn = icon_protocol. " [SỬA]
+*          APPEND ls_pr_alv TO gt_pr_fail.
+*        ENDLOOP.
+*
+*    ENDCASE.
+*  ENDLOOP.
+*
+*  PERFORM highlight_error_cells.
+*
+*ENDFORM.
+
+"chú ý 2
 FORM load_data_from_staging USING iv_req_id TYPE zsd_req_id.
 
   " 1. Refresh
@@ -8412,30 +9491,223 @@ FORM load_data_from_staging USING iv_req_id TYPE zsd_req_id.
         ENDLOOP.
 
 
-      " === TAB 2: SUCCESS ===
-      WHEN 'SUCCESS' OR 'POSTED'.
-        " Logic Delivery Check
-        IF ls_hd_db-vbeln_dlv IS NOT INITIAL.
-          ls_hd_alv-icon = icon_led_green.
-        ELSE.
-          ls_hd_alv-icon = icon_led_yellow.
-        ENDIF.
-        ls_hd_alv-err_btn = ' '. " Success không có lỗi
+*      " === TAB 2: SUCCESS ===
+*      WHEN 'SUCCESS' OR 'POSTED'.
+*        " Logic Delivery Check
+*        IF ls_hd_db-vbeln_dlv IS NOT INITIAL.
+*          ls_hd_alv-icon = icon_led_green.
+*        ELSE.
+*          ls_hd_alv-icon = icon_led_yellow.
+*        ENDIF.
+*        ls_hd_alv-err_btn = ' '. " Success không có lỗi
+*
+*        APPEND ls_hd_alv TO gt_hd_suc.
+*
+*        LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
+*           MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*           ls_it_alv-icon = icon_led_green.
+*           ls_it_alv-err_btn = ' '.
+*           APPEND ls_it_alv TO gt_it_suc.
+*        ENDLOOP.
+*        LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
+*           MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*           ls_pr_alv-icon = icon_led_green.
+*           ls_pr_alv-err_btn = ' '.
+*           APPEND ls_pr_alv TO gt_pr_suc.
+*        ENDLOOP.
 
+*        " === TAB 2: SUCCESS ===
+*      WHEN 'SUCCESS' OR 'POSTED'.
+*        " Logic Delivery Check
+*        IF ls_hd_db-vbeln_dlv IS NOT INITIAL.
+*          ls_hd_alv-icon = icon_led_green.
+*          ls_hd_alv-err_btn = ' '. " Hoàn hảo -> Không cần log
+*        ELSE.
+*          " Incomplete (Thiếu Delivery hoặc SO Incomplete) -> Vàng
+*          ls_hd_alv-icon = icon_led_yellow.
+*          ls_hd_alv-err_btn = icon_protocol. " [SỬA]: Hiện nút để xem Incomplete Log
+*        ENDIF.
+*
+*        " (Nếu bạn muốn check kỹ hơn trường message xem có chữ 'Incomplete' không thì check thêm ở đây)
+*
+*        APPEND ls_hd_alv TO gt_hd_suc.
+*
+*        LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
+*           MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*           ls_it_alv-icon = icon_led_green. " Item thường xanh khi Header Success
+*           ls_it_alv-err_btn = ' '.
+*           APPEND ls_it_alv TO gt_it_suc.
+*        ENDLOOP.
+*        LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
+*           MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*           ls_pr_alv-icon = icon_led_green.
+*           ls_pr_alv-err_btn = ' '.
+*           APPEND ls_pr_alv TO gt_pr_suc.
+*        ENDLOOP.
+
+        " === TAB 2: POSTED SUCCESS ===
+      WHEN 'SUCCESS' OR 'POSTED'.
+        " Chỉ cần append vào bảng, không cần lo màu sắc ở đây nữa
         APPEND ls_hd_alv TO gt_hd_suc.
 
+        " Lấy Item/Cond (Giữ nguyên logic lấy con)
         LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
            MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
-           ls_it_alv-icon = icon_led_green.
-           ls_it_alv-err_btn = ' '.
            APPEND ls_it_alv TO gt_it_suc.
         ENDLOOP.
         LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
            MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
-           ls_pr_alv-icon = icon_led_green.
-           ls_pr_alv-err_btn = ' '.
            APPEND ls_pr_alv TO gt_pr_suc.
         ENDLOOP.
+
+*        " === TAB 2: POSTED SUCCESS ===
+*      WHEN 'SUCCESS' OR 'POSTED'.
+*
+*        " 1. Lấy Icon chuẩn từ DB (Nguồn sự thật duy nhất)
+*        ls_hd_alv-icon = ls_hd_db-icon.
+*
+*        " Fallback: Nếu dữ liệu cũ chưa có icon thì mặc định xanh
+*        IF ls_hd_alv-icon IS INITIAL. ls_hd_alv-icon = icon_led_green. ENDIF.
+*
+*        " 2. Quyết định hiện nút Log dựa trên Icon
+*        IF ls_hd_alv-icon = icon_led_yellow.
+*           " Chỉ hiện nút Log nếu thực sự là Incomplete (Vàng)
+*           ls_hd_alv-err_btn = icon_protocol.
+*        ELSE.
+*           " Xanh (Success hoàn toàn) -> Ẩn nút Log
+*           ls_hd_alv-err_btn = ' '.
+*        ENDIF.
+*
+*        APPEND ls_hd_alv TO gt_hd_suc.
+*
+*        " Xử lý Item/Cond (Ăn theo màu Header)
+*        LOOP AT lt_it INTO DATA(ls_it_db) WHERE temp_id = ls_hd_db-temp_id.
+*           CLEAR ls_it_alv.
+*           MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*           ls_it_alv-icon = ls_hd_alv-icon.
+*           ls_it_alv-err_btn = ' '.
+*           APPEND ls_it_alv TO gt_it_suc.
+*        ENDLOOP.
+*
+*        LOOP AT lt_pr INTO DATA(ls_pr_db) WHERE temp_id = ls_hd_db-temp_id.
+*           CLEAR ls_pr_alv.
+*           MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*           ls_pr_alv-icon = ls_hd_alv-icon.
+*           ls_pr_alv-err_btn = ' '.
+*           APPEND ls_pr_alv TO gt_pr_suc.
+*        ENDLOOP.
+
+
+*         " =========================================================
+*      " TAB 2: POSTED SUCCESS (Logic Màu & Icon Chính Xác)
+*      " =========================================================
+*      WHEN 'SUCCESS' OR 'POSTED'.
+*
+*        " 1. Mặc định là Xanh (Success)
+*        ls_hd_alv-icon = icon_led_green.
+*
+*        " 2. Kiểm tra xem có phải là Success nhưng Incomplete không?
+*        " (Dựa vào MESSAGE hoặc STATUS cũ nếu bạn có lưu status phụ)
+*        " Hoặc đơn giản là check xem có log Warning trong bảng Error Log không
+*
+*        DATA: lv_has_warning TYPE abap_bool.
+*        SELECT SINGLE @abap_true FROM ztb_so_error_log
+*          INTO @lv_has_warning
+*          WHERE req_id = @ls_hd_db-req_id
+*            AND temp_id = @ls_hd_db-temp_id
+*            AND msg_type = 'W'.
+*
+*        IF lv_has_warning = abap_true.
+*           " Có Warning -> Icon Vàng, Hiện nút Log
+*           ls_hd_alv-icon    = icon_led_yellow.
+*           ls_hd_alv-err_btn = icon_protocol.
+*
+*           " Tô màu Vàng ô Sales Doc để gây chú ý
+*           CLEAR ls_color_cell.
+*           ls_color_cell-fname     = 'VBELN_SO'.
+*           ls_color_cell-color-col = 3.
+*           ls_color_cell-color-int = 1.
+*           INSERT ls_color_cell INTO TABLE ls_hd_alv-celltab.
+*
+*        ELSE.
+*           " Hoàn hảo -> Icon Xanh, Ẩn nút Log
+*           ls_hd_alv-icon    = icon_led_green.
+*           ls_hd_alv-err_btn = ' '.
+*
+*           " Tô màu Xanh ô Sales Doc & Delivery (nếu có)
+*           CLEAR ls_color_cell.
+*           ls_color_cell-fname     = 'VBELN_SO'.
+*           ls_color_cell-color-col = 5.
+*           ls_color_cell-color-int = 1.
+*           INSERT ls_color_cell INTO TABLE ls_hd_alv-celltab.
+*
+*           IF ls_hd_alv-vbeln_dlv IS NOT INITIAL.
+*             ls_color_cell-fname = 'VBELN_DLV'.
+*             INSERT ls_color_cell INTO TABLE ls_hd_alv-celltab.
+*           ENDIF.
+*        ENDIF.
+*
+*        APPEND ls_hd_alv TO gt_hd_suc.
+*
+*        " Item/Cond ăn theo màu Header
+*        LOOP AT lt_it INTO DATA(ls_it_db) WHERE temp_id = ls_hd_db-temp_id.
+*           CLEAR ls_it_alv.
+*           MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*           ls_it_alv-icon = ls_hd_alv-icon.
+*           ls_it_alv-err_btn = ' '.
+*           APPEND ls_it_alv TO gt_it_suc.
+*        ENDLOOP.
+*
+*        LOOP AT lt_pr INTO DATA(ls_pr_db) WHERE temp_id = ls_hd_db-temp_id.
+*           CLEAR ls_pr_alv.
+*           MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*           ls_pr_alv-icon = ls_hd_alv-icon.
+*           ls_pr_alv-err_btn = ' '.
+*           APPEND ls_pr_alv TO gt_pr_suc.
+*        ENDLOOP.
+
+
+*        " === TAB 2: POSTED SUCCESS ===
+*      WHEN 'SUCCESS' OR 'POSTED'.
+*
+*        " 1. Xác định màu đèn dựa trên DB (Do perform_create đã lưu vào DB)
+*        " (Nếu trong DB đã lưu icon vàng thì lấy vàng, nếu không thì xanh)
+*        ls_hd_alv-icon = ls_hd_db-icon.
+*        IF ls_hd_alv-icon IS INITIAL. ls_hd_alv-icon = icon_led_green. ENDIF.
+*
+*        " [FIX 1]: Hiển thị nút Log nếu bị Incomplete (Vàng)
+*        IF ls_hd_alv-icon = icon_led_yellow.
+*           ls_hd_alv-err_btn = icon_protocol. " Hiện icon tờ giấy
+*
+*           " [FIX 2]: Tô màu Vàng cho ô Sales Order Number
+*           CLEAR ls_color_cell.
+*           ls_color_cell-fname     = 'VBELN_SO'.
+*           ls_color_cell-color-col = 3. " Vàng
+*           ls_color_cell-color-int = 1.
+*           INSERT ls_color_cell INTO TABLE ls_hd_alv-celltab.
+*        ELSE.
+*           ls_hd_alv-err_btn = ' '. " Xanh thì ẩn nút log
+*        ENDIF.
+*
+*        " (Logic kiểm tra Delivery cũ nếu muốn giữ kết hợp)
+*        " IF ls_hd_db-vbeln_dlv IS INITIAL AND ... -> Có thể set Vàng ở đây nếu muốn
+*
+*        APPEND ls_hd_alv TO gt_hd_suc.
+*
+*        " Xử lý Item/Cond con
+*        LOOP AT lt_it INTO ls_it_db WHERE temp_id = ls_hd_db-temp_id.
+*           CLEAR ls_it_alv.
+*           MOVE-CORRESPONDING ls_it_db TO ls_it_alv.
+*           ls_it_alv-icon = ls_hd_alv-icon. " Item ăn theo màu Header
+*           APPEND ls_it_alv TO gt_it_suc.
+*        ENDLOOP.
+*
+*        LOOP AT lt_pr INTO ls_pr_db WHERE temp_id = ls_hd_db-temp_id.
+*           CLEAR ls_pr_alv.
+*           MOVE-CORRESPONDING ls_pr_db TO ls_pr_alv.
+*           ls_pr_alv-icon = ls_hd_alv-icon.
+*           APPEND ls_pr_alv TO gt_pr_suc.
+*        ENDLOOP.
 
 
       " === TAB 3: FAILED ===
@@ -8462,6 +9734,54 @@ FORM load_data_from_staging USING iv_req_id TYPE zsd_req_id.
 
   PERFORM highlight_error_cells.
 
+*  " 2. [THÊM MỚI] Tô màu Success (Cho tab Success) - Cái mới
+  PERFORM highlight_success_cells.
+
+*  " 1. Cấu hình Sort & Merge cho ITEM ALV
+*  DATA: lt_sort_it TYPE lvc_t_sort,
+*        ls_sort_it TYPE lvc_s_sort.
+*
+*  " Merge cột TEMP_ID
+*  ls_sort_it-fieldname = 'TEMP_ID'.
+*  ls_sort_it-up        = 'X'.   " Sắp xếp tăng dần
+*  ls_sort_it-group     = 'UL'.  " [QUAN TRỌNG]: UL = Underline (Merge ô và gạch chân ngăn cách)
+*  APPEND ls_sort_it TO lt_sort_it.
+*
+*  " Đẩy cấu hình Sort vào Grid Item
+*  IF go_grid_itm_val IS BOUND.
+*    go_grid_itm_val->set_sort_criteria( lt_sort_it ).
+*  ENDIF.
+*  IF go_grid_itm_fail IS BOUND.
+*    go_grid_itm_fail->set_sort_criteria( lt_sort_it ).
+*  ENDIF.
+*
+*  " 2. Cấu hình Sort & Merge cho CONDITION ALV
+*  DATA: lt_sort_pr TYPE lvc_t_sort,
+*        ls_sort_pr TYPE lvc_s_sort.
+*
+*  " Merge cột TEMP_ID
+*  ls_sort_pr-fieldname = 'TEMP_ID'.
+*  ls_sort_pr-up        = 'X'.
+*  ls_sort_pr-group     = 'UL'.
+*  APPEND ls_sort_pr TO lt_sort_pr.
+*
+*  " Merge cột ITEM_NO (Để biết Condition nào thuộc Item nào)
+*  ls_sort_pr-fieldname = 'ITEM_NO'.
+*  ls_sort_pr-up        = 'X'.
+*  ls_sort_pr-group     = 'UL'.
+*  APPEND ls_sort_pr TO lt_sort_pr.
+*
+*  " Đẩy cấu hình Sort vào Grid Condition
+*  IF go_grid_cnd_val IS BOUND.
+*    go_grid_cnd_val->set_sort_criteria( lt_sort_pr ).
+*  ENDIF.
+*  IF go_grid_cnd_fail IS BOUND.
+*    go_grid_cnd_fail->set_sort_criteria( lt_sort_pr ).
+*  ENDIF.
+*
+*  " Refresh lại để thấy hiệu ứng
+*  PERFORM refresh_all_alvs.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -8478,35 +9798,35 @@ FORM popup_select_upload_mode CHANGING cv_mode TYPE c.
   ls_spopli-varoption = '1. Upload new file'.
   APPEND ls_spopli TO lt_spopli.
 
-  ls_spopli-varoption = '2. Resubmit error file'.
-  APPEND ls_spopli TO lt_spopli.
-
-  ls_spopli-varoption = '3. Resume unfinished upload'.
-  APPEND ls_spopli TO lt_spopli.
+*  ls_spopli-varoption = '2. Resubmit error file'.
+*  APPEND ls_spopli TO lt_spopli.
+*
+*  ls_spopli-varoption = '3. Resume unfinished upload'.
+*  APPEND ls_spopli TO lt_spopli.
 
   " 2. Gọi Popup chuẩn (Giống nhóm CRP)
   CALL FUNCTION 'POPUP_TO_DECIDE_LIST'
     EXPORTING
-      titel          = 'Select Upload Mode'
-      textline1      = 'Please choose how you want to proceed:'
-      cursorline     = 1
-      display_only   = space
+      titel              = 'Select Upload Mode'
+      textline1          = 'Please choose how you want to proceed:'
+      cursorline         = 1
+      display_only       = space
     IMPORTING
-      answer         = lv_answer
+      answer             = lv_answer
     TABLES
-      t_spopli       = lt_spopli
+      t_spopli           = lt_spopli
     EXCEPTIONS
       not_enough_answers = 1
       too_much_answers   = 2
       too_many_lines     = 3
-      others             = 4.
+      OTHERS             = 4.
 
   " 3. Xử lý kết quả trả về
   IF sy-subrc = 0 AND lv_answer <> 'A'. " 'A' là Cancel
     CASE lv_answer.
       WHEN '1'. cv_mode = 'N'. " New
-      WHEN '2'. cv_mode = 'R'. " Resubmit
-      WHEN '3'. cv_mode = 'C'. " Continue (Resume)
+*      WHEN '2'. cv_mode = 'R'. " Resubmit
+*      WHEN '3'. cv_mode = 'C'. " Continue (Resume)
     ENDCASE.
   ENDIF.
 ENDFORM.
@@ -8525,21 +9845,21 @@ FORM popup_select_so_action CHANGING cv_answer TYPE c.
   APPEND ls_spopli TO lt_spopli.
   ls_spopli-varoption = '2. Mass Upload Orders'.
   APPEND ls_spopli TO lt_spopli.
-  ls_spopli-varoption = '3. Search & Process Orders'.
-  APPEND ls_spopli TO lt_spopli.
+*  ls_spopli-varoption = '3. Search & Process Orders'.
+*  APPEND ls_spopli TO lt_spopli.
 
   CALL FUNCTION 'POPUP_TO_DECIDE_LIST'
     EXPORTING
-      titel      = 'Manage Sales Order'
-      textline1  = 'Please select an action:'
-      cursorline = 1
+      titel        = 'Manage Sales Order'
+      textline1    = 'Please select an action:'
+      cursorline   = 1
       display_only = space
     IMPORTING
-      answer     = cv_answer
+      answer       = cv_answer
     TABLES
-      t_spopli   = lt_spopli
+      t_spopli     = lt_spopli
     EXCEPTIONS
-      others     = 1.
+      OTHERS       = 1.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -8566,7 +9886,7 @@ FORM popup_select_billing_action CHANGING cv_answer TYPE c.
     TABLES
       t_spopli   = lt_spopli
     EXCEPTIONS
-      others     = 1.
+      OTHERS     = 1.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -8595,7 +9915,7 @@ FORM popup_select_overview_action CHANGING cv_answer TYPE c.
     TABLES
       t_spopli   = lt_spopli
     EXCEPTIONS
-      others     = 1.
+      OTHERS     = 1.
 ENDFORM.
 
 FORM display_welcome_screen .
@@ -8609,12 +9929,12 @@ FORM display_welcome_screen .
         lv_chunklen TYPE i.
 
   "--------------------------------------------------------------------
-  " Ensure the container & HTML viewer are created
+  " 1. Tạo Container & HTML Viewer (Chỉ tạo nếu chưa có)
   "--------------------------------------------------------------------
   IF go_summary_container IS INITIAL.
     CREATE OBJECT go_summary_container
       EXPORTING
-        container_name = 'CC_SUMMARY'.      " Custom Control name on screen 0200
+        container_name = 'CC_SUMMARY'.      " Tên Custom Control trên màn hình 0200
   ENDIF.
 
   IF go_html_viewer IS INITIAL.
@@ -8624,62 +9944,70 @@ FORM display_welcome_screen .
   ENDIF.
 
   "--------------------------------------------------------------------
-  " 1. Build Premium HTML for Welcome Screen
+  " 2. Xây dựng nội dung HTML (Phiên bản Rộng & To hơn)
   "--------------------------------------------------------------------
   CLEAR lv_html.
 
   CONCATENATE lv_html
     '<html><head><meta charset="UTF-8"><style>'
 
-    'body { font-family: Segoe UI, Arial; padding:16px; background-color:#fafafa; }'
-    'h2 { color:#1a73e8; margin-bottom:8px; font-size:20px; font-weight:600; }'
-    'p.subtitle { color:#555; font-size:13px; margin-top:0; margin-bottom:14px; }'
+    " --- Tăng cỡ chữ cơ bản lên 14px ---
+    'body { font-family: "Segoe UI", Arial, sans-serif; padding: 20px; background-color: #fafafa; font-size: 14px; }'
 
-    '.welcome-card { background:#ffffff; padding:14px 18px;'
-      'border-radius:10px; box-shadow:0 1px 4px rgba(0,0,0,0.10);'
-      'border:1px solid #e3e3e3; max-width:520px; }'
+    'h2 { color: #1a73e8; margin-bottom: 12px; font-size: 24px; font-weight: 600; }'
+    'p.subtitle { color: #555; font-size: 15px; margin-top: 0; margin-bottom: 20px; line-height: 1.5; }'
 
-    '.row { display:flex; gap:10px; margin-top:8px; }'
-    '.step { flex:1; background:#f8f9fb; padding:8px 10px; border-radius:8px;'
-      'border:1px solid #e1e4ea; }'
+    " --- Tăng chiều rộng card lên 850px (hoặc 95%) để không bị chật ---
+    '.welcome-card { background: #ffffff; padding: 25px 30px;'
+      'border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'
+      'border: 1px solid #e3e3e3; max-width: 850px; width: 95%; }'
 
-    '.step-title { font-size:13px; font-weight:600; color:#333; margin-bottom:4px; }'
-    '.step-text { font-size:12px; color:#555; margin:0; }'
+    '.row { display: flex; gap: 20px; margin-top: 15px; flex-wrap: wrap; }'
 
-    '.hint { font-size:12px; color:#777; margin-top:10px; }'
-    '.badge { display:inline-block; padding:2px 6px; border-radius:8px;'
-      'font-size:11px; background:#e8f0fe; color:#1a73e8; margin-right:4px; }'
+    " --- Chỉnh lại các ô Step cho thoáng hơn ---
+    '.step { flex: 1; background: #f8f9fb; padding: 15px; border-radius: 8px;'
+      'border: 1px solid #e1e4ea; min-width: 200px; }'
+
+    '.step-title { font-size: 15px; font-weight: 700; color: #202124; margin-bottom: 8px; }'
+    '.step-text { font-size: 13px; color: #444; margin: 0; line-height: 1.4; }'
+
+    '.hint { font-size: 13px; color: #666; margin-top: 20px; background: #fff8e1; padding: 10px; border-radius: 6px; border: 1px solid #ffe082; }'
+    '.badge { display: inline-block; padding: 3px 8px; border-radius: 12px;'
+      'font-size: 12px; background: #e8f0fe; color: #1a73e8; margin-right: 6px; font-weight: bold; }'
+
+    'b { color: #000; }'
 
     '</style></head><body>'
 
     '<h2>Mass Sales Order Upload</h2>'
 
     '<div class="welcome-card">'
-      '<p class="subtitle">No data has been uploaded yet. Please follow the 3 simple steps below to start the Mass Sales Order Upload process.</p>'
+      '<p class="subtitle">Welcome! No data has been uploaded yet. Please follow the standard process below to create Sales Orders in bulk.</p>'
 
       '<div class="row">'
 
+        " --- STEP 1 ---
         '<div class="step">'
-          '<div class="step-title">① Upload Excel File</div>'
-          '<p class="step-text">Choose a mode (<b>NEW</b>, <b>RESUBMIT</b>, <b>RESUME</b>) and upload your completed Excel template.</p>'
+          '<div class="step-title">1. Upload Excel File</div>'
+          '<p class="step-text">Click the <b>Upload File</b> button to select your Excel template. Ensure the file format matches the standard template.</p>'
         '</div>'
 
+        " --- STEP 2 ---
         '<div class="step">'
-          '<div class="step-title">② Validate &amp; Correct Data</div>'
-          '<p class="step-text">The system will load data into staging tables, validate each record and highlight <b>Incomplete</b> or <b>Error</b> rows.</p>'
+          '<div class="step-title">2. Validate Data</div>'
+          '<p class="step-text">The system will validate logic automatically. Check the <b>Validated</b> tab to fix any <b>Incomplete</b> or <b>Error</b> rows.</p>'
         '</div>'
 
+        " --- STEP 3 ---
         '<div class="step">'
-          '<div class="step-title">③ Create Sales Orders &amp; Deliveries</div>'
-          '<p class="step-text">All <b>Complete</b> records will be used to generate Sales Orders, Deliveries and Billing documents.</p>'
+          '<div class="step-title">3. Create Sales Orders</div>'
+          '<p class="step-text">Click <b>Create Sales Order</b>. Successful orders will move to the <b>Posted Success</b> tab, while errors go to <b>Posted Failed</b>.</p>'
         '</div>'
 
       '</div>'
 
       '<p class="hint">'
-        '<span class="badge">Tip</span>'
-        'Click the <b>Upload</b> button in the Application Bar to start. '
-        'Once uploaded, the Validation Summary and 3 result tabs will appear.'
+        '<b>Tip:</b> Start by clicking the <b>Upload File</b> button in the toolbar above.'
       '</p>'
 
     '</div>'
@@ -8688,7 +10016,7 @@ FORM display_welcome_screen .
   INTO lv_html SEPARATED BY space.
 
   "--------------------------------------------------------------------
-  " 2. Convert STRING → W3HTML safely (no FM, supports all SAP systems)
+  " 3. Convert STRING -> W3HTML (Chia nhỏ string để load vào Viewer)
   "--------------------------------------------------------------------
   CLEAR lt_html.
   lv_len = strlen( lv_html ).
@@ -8708,7 +10036,7 @@ FORM display_welcome_screen .
   ENDWHILE.
 
   "--------------------------------------------------------------------
-  " 3. Display HTML content in the viewer
+  " 4. Hiển thị lên màn hình
   "--------------------------------------------------------------------
   go_html_viewer->load_data(
     EXPORTING
@@ -8721,8 +10049,7 @@ FORM display_welcome_screen .
 
   go_html_viewer->show_url( lv_url ).
 
-ENDFORM.                    " display_welcome_screen
-      " display_welcome_screen
+ENDFORM.
 
 *&---------------------------------------------------------------------*
 *& Form SYNC_ALV_TO_STAGING_TABLES
@@ -8766,6 +10093,48 @@ ENDFORM.                    " display_welcome_screen
 *
 *  COMMIT WORK.
 *ENDFORM.
+*FORM sync_alv_to_staging_tables.
+*  DATA: ls_hd_db TYPE ztb_so_upload_hd,
+*        ls_it_db TYPE ztb_so_upload_it,
+*        ls_pr_db TYPE ztb_so_upload_pr.
+*
+*  " 1. Sync Header (Validated & Failed)
+*  LOOP AT gt_hd_val INTO DATA(ls_val_h).
+*    MOVE-CORRESPONDING ls_val_h TO ls_hd_db.
+*    UPDATE ztb_so_upload_hd FROM ls_hd_db.
+*  ENDLOOP.
+*  LOOP AT gt_hd_fail INTO DATA(ls_fail_h).
+*    MOVE-CORRESPONDING ls_fail_h TO ls_hd_db.
+*    UPDATE ztb_so_upload_hd FROM ls_hd_db.
+*  ENDLOOP.
+*
+*  " 2. Sync Item
+*  LOOP AT gt_it_val INTO DATA(ls_val_i).
+*    MOVE-CORRESPONDING ls_val_i TO ls_it_db.
+*    " [LƯU Ý]: Map tay nếu tên trường lệch
+*    ls_it_db-material = ls_val_i-material.
+*    UPDATE ztb_so_upload_it FROM ls_it_db.
+*  ENDLOOP.
+*  LOOP AT gt_it_fail INTO DATA(ls_fail_i).
+*    MOVE-CORRESPONDING ls_fail_i TO ls_it_db.
+*    ls_it_db-material = ls_fail_i-material.
+*    UPDATE ztb_so_upload_it FROM ls_it_db.
+*  ENDLOOP.
+*
+*  " 3. Sync Condition
+*  LOOP AT gt_pr_val INTO DATA(ls_val_p).
+*    MOVE-CORRESPONDING ls_val_p TO ls_pr_db.
+*    UPDATE ztb_so_upload_pr FROM ls_pr_db.
+*  ENDLOOP.
+*  LOOP AT gt_pr_fail INTO DATA(ls_fail_p).
+*    MOVE-CORRESPONDING ls_fail_p TO ls_pr_db.
+*    UPDATE ztb_so_upload_pr FROM ls_pr_db.
+*  ENDLOOP.
+*
+*  COMMIT WORK.
+*ENDFORM.
+
+"chú ý 2
 FORM sync_alv_to_staging_tables.
   DATA: ls_hd_db TYPE ztb_so_upload_hd,
         ls_it_db TYPE ztb_so_upload_it,
@@ -8794,388 +10163,125 @@ FORM sync_alv_to_staging_tables.
     UPDATE ztb_so_upload_it FROM ls_it_db.
   ENDLOOP.
 
-  " 3. Sync Condition
+*  " 3. Sync Condition
+*  LOOP AT gt_pr_val INTO DATA(ls_val_p).
+*    MOVE-CORRESPONDING ls_val_p TO ls_pr_db.
+*    UPDATE ztb_so_upload_pr FROM ls_pr_db.
+*  ENDLOOP.
+*  LOOP AT gt_pr_fail INTO DATA(ls_fail_p).
+*    MOVE-CORRESPONDING ls_fail_p TO ls_pr_db.
+*    UPDATE ztb_so_upload_pr FROM ls_pr_db.
+*  ENDLOOP.
+
+  " ===================================================================
+  " 3. SYNC CONDITION (Chiến thuật: Xóa & Nạp lại)
+  " ===================================================================
+
+  DATA: lr_temp_id_del TYPE RANGE OF char10,
+        lt_pr_insert   TYPE TABLE OF ztb_so_upload_pr.
+
+  " [FIX LỖI]: Khai báo biến tạm cho Range để dùng lệnh COLLECT
+  DATA: ls_range LIKE LINE OF lr_temp_id_del.
+
+  " A. Gom tất cả Temp_ID (Dùng biến ls_range để COLLECT)
   LOOP AT gt_pr_val INTO DATA(ls_val_p).
+    " Build Range Line
+    ls_range-sign   = 'I'.
+    ls_range-option = 'EQ'.
+    ls_range-low    = ls_val_p-temp_id.
+    COLLECT ls_range INTO lr_temp_id_del.
+
+    " Chuẩn bị dữ liệu Insert
     MOVE-CORRESPONDING ls_val_p TO ls_pr_db.
-    UPDATE ztb_so_upload_pr FROM ls_pr_db.
+    APPEND ls_pr_db TO lt_pr_insert.
   ENDLOOP.
+
   LOOP AT gt_pr_fail INTO DATA(ls_fail_p).
+    " Build Range Line
+    ls_range-sign   = 'I'.
+    ls_range-option = 'EQ'.
+    ls_range-low    = ls_fail_p-temp_id.
+    COLLECT ls_range INTO lr_temp_id_del.
+
     MOVE-CORRESPONDING ls_fail_p TO ls_pr_db.
-    UPDATE ztb_so_upload_pr FROM ls_pr_db.
+    APPEND ls_pr_db TO lt_pr_insert.
   ENDLOOP.
+
+  " B. Thực hiện Xóa & Chèn
+  IF lr_temp_id_del IS NOT INITIAL.
+
+    " 1. Xóa sạch Condition cũ của các Temp ID này trong DB
+    DELETE FROM ztb_so_upload_pr
+      WHERE req_id = gv_current_req_id
+        AND temp_id IN lr_temp_id_del.
+
+*    " 2. Chèn lại dữ liệu mới từ màn hình
+*    IF lt_pr_insert IS NOT INITIAL.
+*      INSERT ztb_so_upload_pr FROM TABLE lt_pr_insert.
+*    ENDIF.
+
+    " 2. Chèn lại dữ liệu mới từ màn hình
+    IF lt_pr_insert IS NOT INITIAL.
+
+      " [FIX DUMP]: Sắp xếp và Xóa các dòng trùng khóa trong bảng nội bộ trước khi Insert
+      SORT lt_pr_insert BY req_id temp_id item_no cond_type.
+      DELETE ADJACENT DUPLICATES FROM lt_pr_insert COMPARING req_id temp_id item_no cond_type.
+
+      " Bây giờ bảng đã sạch (Unique), Insert sẽ không bị Dump
+      INSERT ztb_so_upload_pr FROM TABLE lt_pr_insert.
+    ENDIF.
+
+  ENDIF.
 
   COMMIT WORK.
 ENDFORM.
 
-**&---------------------------------------------------------------------*
-**& Form EXPORT_ERROR_FIXPACK (Fixed Version)
-**&---------------------------------------------------------------------*
-*FORM export_error_fixpack.
-*  " --- 1. Khai báo biến ---
-*  DATA: lo_excel      TYPE REF TO zcl_excel,
-*        lo_worksheet  TYPE REF TO zcl_excel_worksheet,
-*        lo_writer     TYPE REF TO zif_excel_writer,
-*        lv_xstring    TYPE xstring,
-*        lv_path       TYPE string,
-*        lv_action     TYPE i.
-*
-*  " Style Objects
-*  DATA: lo_style_hdr  TYPE REF TO zcl_excel_style,
-*        lo_style_err  TYPE REF TO zcl_excel_style,
-*        lo_style_warn TYPE REF TO zcl_excel_style,
-*        lo_style_lock TYPE REF TO zcl_excel_style.
-*
-*  " Comment Object
-*  DATA: lo_comment    TYPE REF TO zcl_excel_comment.
-*
-*  DATA: lt_error_log TYPE TABLE OF ztb_so_error_log.
-*
-*  " --- 2. Lấy dữ liệu Log ---
-*  SELECT * FROM ztb_so_error_log
-*    INTO TABLE lt_error_log
-*    WHERE req_id = gv_current_req_id.
-*
-*  IF lt_error_log IS INITIAL.
-*    MESSAGE 'No errors found to export.' TYPE 'S' DISPLAY LIKE 'W'.
-*    RETURN.
-*  ENDIF.
-*
-*  " --- 3. Khởi tạo Excel Object ---
-*  CREATE OBJECT lo_excel.
-*
-*  " --- 4. Định nghĩa Styles (Dùng mã màu trực tiếp để tránh lỗi) ---
-*
-*  " Style 1: Header Row (Xanh đậm, Chữ trắng)
-*  lo_style_hdr = lo_excel->add_new_style( ).
-*  lo_style_hdr->font->bold = abap_true.
-*  lo_style_hdr->font->color-rgb = 'FFFFFFFF'.
-*  lo_style_hdr->fill->filltype = 'solid'.
-*  lo_style_hdr->fill->fgcolor-rgb = 'FF0070C0'.
-*
-*  " Style 2: Error Cell (Đỏ nhạt)
-*  lo_style_err = lo_excel->add_new_style( ).
-*  lo_style_err->fill->filltype = 'solid'.
-*  lo_style_err->fill->fgcolor-rgb = 'FFFFCCCC'.
-*
-*  " Style 3: Warning/Incomplete Cell (Vàng nhạt)
-*  lo_style_warn = lo_excel->add_new_style( ).
-*  lo_style_warn->fill->filltype = 'solid'.
-*  lo_style_warn->fill->fgcolor-rgb = 'FFFFFFCC'.
-*
-*  " Style 4: Locked Column (Xám nhạt)
-*  lo_style_lock = lo_excel->add_new_style( ).
-*  lo_style_lock->fill->filltype = 'solid'.
-*  " [SỬA LỖI]: Dùng mã Hex thay vì hằng số C_GRAY_25_PERCENT
-*  lo_style_lock->fill->fgcolor-rgb = 'FFC0C0C0'.
-*  lo_style_lock->protection->locked = abap_true.
-*
-*  " ====================================================================
-*  " SHEET 1: HEADER ERRORS
-*  " ====================================================================
-*
-*  " 1. Lấy Worksheet đầu tiên
-*  lo_worksheet = lo_excel->get_active_worksheet( ).
-*  lo_worksheet->set_title( 'Header Errors' ).
-*
-*  " [SỬA LỖI]: Dùng method SET_TABCOLOR
-*  lo_worksheet->set_tabcolor( 'FFFF0000' ). " Màu đỏ
-*
-*  " 2. Lấy dữ liệu Header bị lỗi
-*  SELECT * FROM ztb_so_upload_hd
-*    INTO TABLE @DATA(lt_hd_err)
-*    WHERE req_id = @gv_current_req_id
-*      AND ( status = 'ERROR' OR status = 'INCOMP' OR status = 'FAILED' ).
-*
-*  " 3. Định nghĩa Cấu trúc Cột (Mapping)
-*  TYPES: BEGIN OF ty_map,
-*           col_idx   TYPE i,
-*           col_name  TYPE string,
-*           fieldname TYPE fieldname,
-*         END OF ty_map.
-*  DATA: lt_map_hdr TYPE TABLE OF ty_map.
-*
-*  " (Cấu trúc này phải khớp với Template Header mới của bạn)
-*  lt_map_hdr = VALUE #(
-*    ( col_idx = 1  col_name = 'TEMP ID'                  fieldname = 'TEMP_ID' )
-*    ( col_idx = 2  col_name = '*SALES ORDER TYPE'        fieldname = 'ORDER_TYPE' )
-*    ( col_idx = 3  col_name = '*SALES ORG.'              fieldname = 'SALES_ORG' )
-*    ( col_idx = 4  col_name = '*DIST. CHNL'              fieldname = 'SALES_CHANNEL' )
-*    ( col_idx = 5  col_name = '*DIVISION'                fieldname = 'SALES_DIV' )
-*    ( col_idx = 6  col_name = 'SALES OFFICE'             fieldname = 'SALES_OFF' )
-*    ( col_idx = 7  col_name = 'SALES GROUP'              fieldname = 'SALES_GRP' )
-*    ( col_idx = 8  col_name = '*SOLD-TO PARTY'           fieldname = 'SOLD_TO_PARTY' )
-*    ( col_idx = 9  col_name = '*CUST. REF.'              fieldname = 'CUST_REF' )
-*    ( col_idx = 10 col_name = '*REQUESTED DELIVERY DATE' fieldname = 'REQ_DATE' )
-*    ( col_idx = 11 col_name = 'PAYT. TERM'               fieldname = 'PMNTTRMS' )
-*    ( col_idx = 12 col_name = 'INCOTERM'                 fieldname = 'INCOTERMS' )
-*    ( col_idx = 13 col_name = 'INCOTERM-LOCATION'        fieldname = 'INCO2' )
-*  ).
-*
-*  " 4. Vẽ Dòng Tiêu Đề
-*  LOOP AT lt_map_hdr INTO DATA(ls_map).
-*    lo_worksheet->set_cell( ip_row = 1 ip_column = ls_map-col_idx ip_value = ls_map-col_name ip_style = lo_style_hdr->get_guid( ) ).
-*    lo_worksheet->set_column_width( ip_column = ls_map-col_idx ip_width_fix = 20 ).
-*  ENDLOOP.
-*
-*  " [SỬA LỖI]: Dùng IP_NUM_ROWS thay vì IP_ROW
-*  lo_worksheet->freeze_panes( ip_num_rows = 1 ip_num_columns = 1 ).
-*
-*  " 5. Đổ Dữ liệu & Tô Màu Lỗi
-*  DATA: lv_row_idx TYPE i VALUE 2.
-*
-*  LOOP AT lt_hd_err INTO DATA(ls_hd_row).
-*
-*    LOOP AT lt_map_hdr INTO ls_map.
-*      " A. Gán Giá trị
-*      ASSIGN COMPONENT ls_map-fieldname OF STRUCTURE ls_hd_row TO FIELD-SYMBOL(<fv_val>).
-*      IF <fv_val> IS ASSIGNED.
-*        lo_worksheet->set_cell( ip_row = lv_row_idx ip_column = ls_map-col_idx ip_value = <fv_val> ).
-*      ENDIF.
-*
-*      " B. Check Lỗi & Tô màu
-*      READ TABLE lt_error_log ASSIGNING FIELD-SYMBOL(<fs_log>)
-*        WITH KEY req_id    = ls_hd_row-req_id
-*                 temp_id   = ls_hd_row-temp_id
-*                 item_no   = '000000'            " Header
-*                 fieldname = ls_map-fieldname.
-*
-*      IF sy-subrc = 0.
-*        " 1. Set Style (Đỏ/Vàng)
-*        IF <fs_log>-msg_type = 'E'.
-*          lo_worksheet->set_cell_style( ip_row = lv_row_idx ip_column = ls_map-col_idx ip_style = lo_style_err->get_guid( ) ).
-*        ELSE.
-*          lo_worksheet->set_cell_style( ip_row = lv_row_idx ip_column = ls_map-col_idx ip_style = lo_style_warn->get_guid( ) ).
-*        ENDIF.
-*
-*        " 2. [SỬA LỖI]: Thêm Comment đúng cách
-*        CREATE OBJECT lo_comment.
-*        " [SỬA LỖI]: Convert sang string để khớp type
-*        lo_comment->set_text( ip_text = CONV string( <fs_log>-message ) ).
-*
-*        " [SỬA LỖI]: Dùng ADD_COMMENT thay vì ADD_COMMENT_AT_CELL
-*        lo_worksheet->add_comment(
-*            ip_row     = lv_row_idx
-*            ip_column  = ls_map-col_idx
-*            ip_comment = lo_comment ).
-*
-*        " (Bỏ set_height/width để tránh lỗi version)
-*      ENDIF.
-*
-*    ENDLOOP.
-*    lv_row_idx = lv_row_idx + 1.
-*  ENDLOOP.
-*
-*  " --- 6. Xuất File (Download) ---
-*  CREATE OBJECT lo_writer TYPE zcl_excel_writer_2007.
-*  lv_xstring = lo_writer->write_file( lo_excel ).
-*
-*  CALL METHOD cl_gui_frontend_services=>file_save_dialog
-*    EXPORTING
-*      default_extension = 'xlsx'
-*      default_file_name = 'SO_Error_FixPack.xlsx'
-*    CHANGING
-*      fullpath          = lv_path
-*      user_action       = lv_action
-*    EXCEPTIONS OTHERS   = 4.
-*
-*  IF lv_action <> cl_gui_frontend_services=>action_cancel.
-*    " Convert & Download
-*    DATA: lt_raw TYPE solix_tab, lv_len TYPE i.
-*    CALL FUNCTION 'SCMS_XSTRING_TO_BINARY'
-*      EXPORTING buffer = lv_xstring
-*      IMPORTING output_length = lv_len
-*      TABLES binary_tab = lt_raw.
-*
-*    CALL METHOD cl_gui_frontend_services=>gui_download
-*      EXPORTING bin_filesize = lv_len filename = lv_path filetype = 'BIN'
-*      TABLES data_tab = lt_raw.
-*  ENDIF.
-*
-*ENDFORM.
-
-*&---------------------------------------------------------------------*
-*& Form SHOW_ERROR_DETAILS_POPUP
-*&---------------------------------------------------------------------*
-*FORM show_error_details_popup USING iv_temp_id TYPE char10
-*                                    iv_item_no TYPE posnr_va.
-*
-*  DATA: lt_logs TYPE TABLE OF ztb_so_error_log.
-*  DATA: lo_alv  TYPE REF TO cl_salv_table.
-*
-*  " 1. Tìm lỗi trong DB (Dựa vào Key dòng đang chọn)
-*  " (Lấy cả lỗi Header và lỗi Item nếu cần, hoặc chỉ lỗi của dòng đó)
-*
-*  IF iv_item_no = '000000'. " Nếu click ở Header
-*    SELECT * FROM ztb_so_error_log INTO TABLE lt_logs
-*      WHERE req_id  = gv_current_req_id
-*        AND temp_id = iv_temp_id
-*        AND item_no = '000000'. " Chỉ lấy lỗi Header
-*  ELSE. " Nếu click ở Item
-*    SELECT * FROM ztb_so_error_log INTO TABLE lt_logs
-*      WHERE req_id  = gv_current_req_id
-*        AND temp_id = iv_temp_id
-*        AND item_no = iv_item_no.
-*  ENDIF.
-*
-*  " 2. Xử lý nếu không có lỗi
-*  IF lt_logs IS INITIAL.
-*    MESSAGE 'No errors found for this row.' TYPE 'S'.
-*    RETURN.
-*  ENDIF.
-*
-*  " 3. Hiển thị Popup bằng SALV (Gọn nhẹ, đẹp)
-*  TRY.
-*      cl_salv_table=>factory(
-*        IMPORTING r_salv_table = lo_alv
-*        CHANGING  t_table      = lt_logs ).
-*
-*      " Cấu hình Popup
-*      lo_alv->set_screen_popup(
-*        start_column = 10
-*        end_column   = 100
-*        start_line   = 5
-*        end_line     = 20 ).
-*
-*      " Tối ưu cột (Chỉ hiện Field và Message)
-*      DATA(lo_cols) = lo_alv->get_columns( ).
-*      lo_cols->set_optimize( abap_true ).
-*
-*      " Ẩn các cột không cần thiết (ReqID, TempID...) cho gọn
-*      lo_cols->get_column( 'MANDT' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'REQ_ID' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'TEMP_ID' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'ITEM_NO' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'LOG_USER' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'LOG_DATE' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'STATUS' )->set_visible( abap_false ).
-*
-*      " Đổi tên cột cho dễ hiểu
-*      lo_cols->get_column( 'FIELDNAME' )->set_long_text( 'Field Name' ).
-*      lo_cols->get_column( 'MSG_TYPE' )->set_long_text( 'Type' ).
-*      lo_cols->get_column( 'MESSAGE' )->set_long_text( 'Error Message Description' ).
-*
-*      lo_alv->display( ).
-*
-*    CATCH cx_salv_msg.
-*  ENDTRY.
-*
-*ENDFORM.
-*FORM show_error_details_popup
-*  USING iv_req_id  TYPE zsd_req_id
-*        iv_temp_id TYPE char10
-*        iv_item_no TYPE posnr_va.
-*
-*  DATA: lt_logs TYPE TABLE OF ztb_so_error_log.
-*  DATA: lo_alv  TYPE REF TO cl_salv_table.
-*
-*  " 1. Tìm lỗi trong DB
-*  " [CẢI TIẾN]: Nếu click vào Header (000000), ta hiển thị TẤT CẢ lỗi của đơn hàng đó
-*  " (Bao gồm cả lỗi Header và lỗi của các Item con) -> Giúp user dễ debug hơn.
-*
-*  IF iv_item_no = '000000' OR iv_item_no IS INITIAL.
-*    SELECT * FROM ztb_so_error_log INTO TABLE lt_logs
-*      WHERE req_id  = iv_req_id
-*        AND temp_id = iv_temp_id.
-*        " (Bỏ điều kiện item_no để lấy hết cả con)
-*  ELSE.
-*    " Nếu click vào Item cụ thể -> Chỉ hiện lỗi của Item đó
-*    SELECT * FROM ztb_so_error_log INTO TABLE lt_logs
-*      WHERE req_id  = iv_req_id
-*        AND temp_id = iv_temp_id
-*        AND item_no = iv_item_no.
-*  ENDIF.
-*
-*  " 2. Xử lý nếu không có lỗi (Debug Trap)
-*  IF lt_logs IS INITIAL.
-*    " Hiển thị thông báo chi tiết để biết tại sao không tìm thấy (giúp debug)
-*    MESSAGE |No errors found for Key: { iv_req_id }-{ iv_temp_id }-{ iv_item_no }| TYPE 'S' DISPLAY LIKE 'W'.
-*    RETURN.
-*  ENDIF.
-*
-*  " 3. Hiển thị Popup (ALV)
-*  TRY.
-*      cl_salv_table=>factory(
-*        IMPORTING r_salv_table = lo_alv
-*        CHANGING  t_table      = lt_logs ).
-*
-*      lo_alv->set_screen_popup(
-*        start_column = 10 end_column = 110
-*        start_line   = 5  end_line   = 20 ).
-*
-*      DATA(lo_cols) = lo_alv->get_columns( ).
-*      lo_cols->set_optimize( abap_true ).
-*
-*      " Ẩn bớt cột thừa
-*      lo_cols->get_column( 'MANDT' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'REQ_ID' )->set_visible( abap_false ).
-*      lo_cols->get_column( 'STATUS' )->set_visible( abap_false ).
-*
-*      " Đổi tên cột
-*      lo_cols->get_column( 'TEMP_ID' )->set_long_text( 'Temp ID' ).
-*      lo_cols->get_column( 'ITEM_NO' )->set_long_text( 'Item' ).
-*      lo_cols->get_column( 'FIELDNAME' )->set_long_text( 'Field' ).
-*      lo_cols->get_column( 'MESSAGE' )->set_long_text( 'Error Description' ).
-*
-*      lo_alv->display( ).
-*
-*    CATCH cx_salv_msg.
-*  ENDTRY.
-*ENDFORM.
-*&---------------------------------------------------------------------*
-*& Form SHOW_ERROR_DETAILS_POPUP (Show All & Highlight Context)
-*&---------------------------------------------------------------------*
-*&---------------------------------------------------------------------*
-*& Form SHOW_ERROR_DETAILS_POPUP (Fixed: LVC_T_SCOL Color)
-*&---------------------------------------------------------------------*
+"chú ý 2
 FORM show_error_details_popup
-  USING iv_req_id  TYPE zsd_req_id
-        iv_temp_id TYPE char10
-        iv_item_no TYPE posnr_va.
+  USING VALUE(iv_req_id)  TYPE zsd_req_id
+        VALUE(iv_temp_id) TYPE char10
+        VALUE(iv_item_no) TYPE posnr_va.
 
-  " 1. Cấu trúc hiển thị (SỬA LỖI: Dùng LVC_T_SCOL)
+  " 1. Cấu trúc hiển thị
   TYPES: BEGIN OF ty_error_pop.
            INCLUDE TYPE ztb_so_error_log.
-    TYPES: row_color TYPE lvc_t_scol, " <<< SỬA: Đổi từ CHAR4 sang Table Type
+    TYPES: row_color TYPE lvc_t_scol, " Cột màu
          END OF ty_error_pop.
 
   DATA: lt_display TYPE TABLE OF ty_error_pop,
         ls_display TYPE ty_error_pop.
-
   DATA: lt_logs    TYPE TABLE OF ztb_so_error_log.
   DATA: lo_alv     TYPE REF TO cl_salv_table,
         lo_columns TYPE REF TO cl_salv_columns_table.
+  DATA: ls_color   TYPE lvc_s_scol.
+  DATA: lv_has_error TYPE abap_bool.
 
-  " Biến màu sắc
-  DATA: ls_color TYPE lvc_s_scol.
+  " 2. Lấy TOÀN BỘ lỗi
+  SELECT * FROM ztb_so_error_log INTO TABLE @lt_logs
+    WHERE req_id  = @iv_req_id
+      AND temp_id = @iv_temp_id.
 
-  " 2. Lấy TOÀN BỘ lỗi của Temp ID này
-  SELECT * FROM ztb_so_error_log
-    INTO TABLE lt_logs
-    WHERE req_id  = iv_req_id
-      AND temp_id = iv_temp_id.
-
-  IF lt_logs IS INITIAL.
-    MESSAGE |No errors found for Order { iv_temp_id }| TYPE 'S' DISPLAY LIKE 'W'.
+  IF sy-subrc <> 0.
+    MESSAGE |No logs found for { iv_temp_id }| TYPE 'S' DISPLAY LIKE 'W'.
     RETURN.
   ENDIF.
 
-  " 3. Xử lý Tô màu (Logic Mới cho LVC_T_SCOL)
+  " 3. Xử lý Tô màu
   LOOP AT lt_logs INTO DATA(ls_log).
     CLEAR ls_display.
     MOVE-CORRESPONDING ls_log TO ls_display.
 
-    " Logic tô màu:
-    " Nếu Item No của dòng lỗi khớp với ngữ cảnh click -> Tô màu Xanh
+    " Check Error
+    IF ls_log-msg_type = 'E' OR ls_log-msg_type = 'A' OR ls_log-msg_type = 'X'.
+       lv_has_error = abap_true.
+    ENDIF.
+
+    " Highlight dòng được chọn
     IF ls_log-item_no = iv_item_no.
-
        CLEAR ls_color.
-       ls_color-color-col = 5. " 5 = Green
-       ls_color-color-int = 0.
-       ls_color-color-inv = 0.
-       ls_color-fname     = space. " Để trống = Tô cả dòng (Row Color)
-
+       ls_color-color-col = 5. " Green
+       ls_color-fname     = space.
        APPEND ls_color TO ls_display-row_color.
-
     ENDIF.
 
     APPEND ls_display TO lt_display.
@@ -9187,49 +10293,50 @@ FORM show_error_details_popup
         IMPORTING r_salv_table = lo_alv
         CHANGING  t_table      = lt_display ).
 
-      " Cấu hình Popup
       lo_alv->set_screen_popup(
         start_column = 10 end_column = 120
         start_line   = 5  end_line   = 25 ).
 
-      " Cấu hình Cột Màu (Bây giờ sẽ chạy OK vì type đã đúng)
       lo_columns = lo_alv->get_columns( ).
+
+      " Cấu hình cột màu (Chỉ cần dòng này là đủ, không cần get_column)
       lo_columns->set_color_column( 'ROW_COLOR' ).
       lo_columns->set_optimize( abap_true ).
 
-      " Ẩn bớt cột thừa
-      TRY.
-          lo_columns->get_column( 'MANDT' )->set_visible( abap_false ).
-          lo_columns->get_column( 'REQ_ID' )->set_visible( abap_false ).
-          lo_columns->get_column( 'ROW_COLOR' )->set_visible( abap_false ). " Ẩn cột kỹ thuật này đi
-          lo_columns->get_column( 'LOG_USER' )->set_visible( abap_false ).
-          lo_columns->get_column( 'LOG_DATE' )->set_visible( abap_false ).
-          lo_columns->get_column( 'STATUS' )->set_visible( abap_false ).
+      " Ẩn cột thừa (Dùng helper macro hoặc try catch từng dòng để an toàn)
+      TRY. lo_columns->get_column( 'MANDT' )->set_visible( abap_false ). CATCH cx_root. ENDTRY.
+      TRY. lo_columns->get_column( 'REQ_ID' )->set_visible( abap_false ). CATCH cx_root. ENDTRY.
+      " [FIX]: KHÔNG GỌI get_column('ROW_COLOR') VÌ NÓ GÂY DUMP
 
-          lo_columns->get_column( 'TEMP_ID' )->set_long_text( 'Order ID' ).
-          lo_columns->get_column( 'ITEM_NO' )->set_long_text( 'Item No' ).
-          lo_columns->get_column( 'FIELDNAME' )->set_long_text( 'Field Error' ).
-          lo_columns->get_column( 'MESSAGE' )->set_long_text( 'Error Description' ).
-          lo_columns->get_column( 'MSG_TYPE' )->set_long_text( 'Type' ).
-        CATCH cx_salv_not_found.
-      ENDTRY.
+      TRY. lo_columns->get_column( 'LOG_USER' )->set_visible( abap_false ). CATCH cx_root. ENDTRY.
+      TRY. lo_columns->get_column( 'LOG_DATE' )->set_visible( abap_false ). CATCH cx_root. ENDTRY.
+      TRY. lo_columns->get_column( 'STATUS' )->set_visible( abap_false ). CATCH cx_root. ENDTRY.
 
-      " Tiêu đề Popup
+      TRY. lo_columns->get_column( 'TEMP_ID' )->set_long_text( 'Order ID' ). CATCH cx_root. ENDTRY.
+      TRY. lo_columns->get_column( 'ITEM_NO' )->set_long_text( 'Item No' ). CATCH cx_root. ENDTRY.
+      TRY. lo_columns->get_column( 'FIELDNAME' )->set_long_text( 'Field Name' ). CATCH cx_root. ENDTRY.
+      TRY. lo_columns->get_column( 'MESSAGE' )->set_long_text( 'Description' ). CATCH cx_root. ENDTRY.
+      TRY. lo_columns->get_column( 'MSG_TYPE' )->set_long_text( 'Type' ). CATCH cx_root. ENDTRY.
+
+      " Tiêu đề
       DATA: lv_title TYPE lvc_title.
-      IF iv_item_no = '000000'.
-        lv_title = |Error Logs for Order { iv_temp_id } (Header Selected)|.
-      ELSE.
-        lv_title = |Error Logs for Order { iv_temp_id } (Item { iv_item_no } Selected)|.
-      ENDIF.
-      lo_alv->get_display_settings( )->set_list_header( lv_title ).
+      IF lv_has_error = abap_true. lv_title = |Error Logs: { iv_temp_id }|.
+      ELSE.                        lv_title = |Incomplete Logs: { iv_temp_id }|. ENDIF.
 
+      IF iv_item_no = '000000'.    lv_title = |{ lv_title } (Header)|.
+      ELSE.                        DATA(lv_it) = iv_item_no. SHIFT lv_it LEFT DELETING LEADING '0'.
+                                   lv_title = |{ lv_title } (Item { lv_it })|. ENDIF.
+
+      lo_alv->get_display_settings( )->set_list_header( lv_title ).
+      lo_alv->get_functions( )->set_all( abap_true ).
       lo_alv->display( ).
 
-    CATCH cx_salv_msg.
-      MESSAGE 'Error displaying ALV Popup' TYPE 'E'.
+    CATCH cx_salv_msg INTO DATA(lx_msg).
+      MESSAGE lx_msg->get_text( ) TYPE 'S' DISPLAY LIKE 'E'.
   ENDTRY.
 
 ENDFORM.
+
 
 *----------------------------------------------------------------------*
 * HOME CENTER EVENT HANDLER.
@@ -9309,19 +10416,11 @@ ENDFORM.
 * Desc: Select data from VBAK/LIKP for KPIs and ALV
 *----------------------------------------------------------------------*
 FORM hc_fetch_data.
-  " 1. KPI: Total Sales Orders (Today)
-  SELECT COUNT( * ) FROM vbak INTO gv_hc_total_so
-    WHERE erdat = sy-datum AND vbtyp = 'C'.
+  " --- KPI Logic ---
+  SELECT COUNT( * ) FROM vbak INTO gv_hc_total_so WHERE erdat = sy-datum AND vbtyp = 'C'.
+  SELECT COUNT( * ) FROM vbak INTO gv_hc_pending WHERE gbstk IN ('A','B') AND vbtyp = 'C' AND erdat >= sy-datum.
+  SELECT SUM( netwr ) FROM vbak INTO gv_hc_net_val WHERE erdat = sy-datum AND vbtyp = 'C'.
 
-  " 2. KPI: Pending Orders (Status A or B)
-  SELECT COUNT( * ) FROM vbak INTO gv_hc_pending
-    WHERE gbstk IN ('A','B') AND vbtyp = 'C' AND erdat >= sy-datum.
-
-  " 3. KPI: Net Value (Today)
-  SELECT SUM( netwr ) FROM vbak INTO gv_hc_net_val
-    WHERE erdat = sy-datum AND vbtyp = 'C'.
-
-  " Format Net Value (Billions/Millions)
   DATA: lv_temp_val TYPE p DECIMALS 2.
   IF gv_hc_net_val >= 1000000000.
     lv_temp_val = gv_hc_net_val / 1000000000.
@@ -9333,11 +10432,9 @@ FORM hc_fetch_data.
     gv_hc_net_disp = |{ gv_hc_net_val NUMBER = USER }|.
   ENDIF.
 
-  " 4. KPI: PGI Completed (Status C)
-  SELECT COUNT( * ) FROM vbak INTO gv_hc_pgi
-     WHERE erdat = sy-datum AND vbtyp = 'C' AND gbstk = 'C'.
+  SELECT COUNT( * ) FROM vbak INTO gv_hc_pgi WHERE erdat = sy-datum AND vbtyp = 'C' AND gbstk = 'C'.
 
-  " 5. ALV Data: Recent Orders (Today)
+  " --- ALV Logic ---
   REFRESH gt_hc_alv_data.
 
   SELECT vbeln, erzet, ernam, gbstk, auart, vkorg, vtweg, spart, netwr, waerk
@@ -9358,16 +10455,91 @@ FORM hc_fetch_data.
       gbstk      = ls_raw-gbstk
     ).
 
-    " Map Status Text (No Icon)
-    CASE ls_raw-gbstk.
-      WHEN 'C'. ls_alv-gbstk_txt = 'Completed'.
-      WHEN 'B'. ls_alv-gbstk_txt = 'In Process'.
-      WHEN OTHERS. ls_alv-gbstk_txt = 'Open'.
+    " --- LOGIC STATUS ---
+    DATA: lv_is_delivery_group TYPE abap_bool.
+
+    " [FIXED] Dùng CASE thay vì IF ... IN (...)
+    CASE ls_raw-auart.
+      WHEN 'ZORR' OR 'ZBB' OR 'ZFOC' OR 'ZRET'.
+        lv_is_delivery_group = abap_true.  " Nhom 1
+      WHEN OTHERS.
+        lv_is_delivery_group = abap_false. " Nhom 2
     ENDCASE.
+
+    " >> B1: CHECK BILLING & FI
+    DATA: lv_billing_doc TYPE vbrk-vbeln,
+          lv_fi_status   TYPE vbrk-rfbsk.
+    CLEAR: lv_billing_doc, lv_fi_status.
+
+    SELECT SINGLE vbrk~vbeln, vbrk~rfbsk
+      FROM vbfa
+      INNER JOIN vbrk ON vbrk~vbeln = vbfa~vbeln
+      INTO (@lv_billing_doc, @lv_fi_status)
+      WHERE vbfa~vbelv   = @ls_raw-vbeln
+        AND vbfa~vbtyp_n = 'M'
+        AND vbrk~fksto   = @space.
+
+    IF sy-subrc = 0.
+      IF lv_fi_status = 'C'.
+        ls_alv-gbstk_txt   = 'FI Doc created'.
+        ls_alv-status_icon = icon_payment.        " @15@ Payment
+      ELSE.
+        ls_alv-gbstk_txt   = 'Billing created'.
+        ls_alv-status_icon = icon_select_detail.  " [FIXED] @0T@ Text View
+      ENDIF.
+
+      APPEND ls_alv TO gt_hc_alv_data.
+      CONTINUE.
+    ENDIF.
+
+    " >> B2: CHECK DELIVERY
+    IF lv_is_delivery_group = abap_true.
+      DATA: lv_deliv_doc TYPE likp-vbeln,
+            lv_gm_status TYPE likp-wbstk.
+      CLEAR: lv_deliv_doc, lv_gm_status.
+
+      SELECT SINGLE likp~vbeln, likp~wbstk
+        FROM vbfa
+        INNER JOIN likp ON likp~vbeln = vbfa~vbeln
+        INTO (@lv_deliv_doc, @lv_gm_status)
+        WHERE vbfa~vbelv   = @ls_raw-vbeln
+          AND vbfa~vbtyp_n IN ('J', 'T').
+
+      IF sy-subrc = 0.
+        IF ls_raw-auart = 'ZRET'. " Return
+          IF lv_gm_status = 'C'.
+            ls_alv-gbstk_txt   = 'PGR Posted, ready Billing'.
+            ls_alv-status_icon = icon_select_detail. " [FIXED] @0T@
+          ELSE.
+            ls_alv-gbstk_txt   = 'Return Del created, ready PGR'.
+            ls_alv-status_icon = icon_delivery.      " @49@ Delivery
+          ENDIF.
+        ELSE. " Sales
+          IF lv_gm_status = 'C'.
+            ls_alv-gbstk_txt   = 'PGI Posted, ready Billing'.
+            ls_alv-status_icon = icon_select_detail. " [FIXED] @0T@
+          ELSE.
+            ls_alv-gbstk_txt   = 'Delivery created, ready PGI'.
+            ls_alv-status_icon = icon_delivery.      " @49@ Delivery
+          ENDIF.
+        ENDIF.
+
+        APPEND ls_alv TO gt_hc_alv_data.
+        CONTINUE.
+      ENDIF.
+
+      " -- Chua co Delivery --
+      ls_alv-gbstk_txt   = 'Order created'.
+      ls_alv-status_icon = icon_order. " @4A@ Order
+
+    ELSE.
+      " >> B3: DEFAULT NON-DELIVERY
+      ls_alv-gbstk_txt   = 'Ready Billing'.
+      ls_alv-status_icon = icon_order. " @4A@ Order
+    ENDIF.
 
     APPEND ls_alv TO gt_hc_alv_data.
   ENDLOOP.
-
 ENDFORM.
 
 *----------------------------------------------------------------------*
@@ -9380,10 +10552,11 @@ FORM hc_display_alv.
 
   " --- FIELD CATALOG (Optimized for Fullscreen) ---
   lt_fcat = VALUE #(
+      ( fieldname = 'STATUS_ICON' coltext = 'Sts'      icon = 'X' outputlen = 4 just = 'C' )
       " 1. Overall Status (No Color, Full Text)
-      ( fieldname = 'GBSTK_TXT'   coltext = 'Overall Status' outputlen = 15 just = 'C' )
+      ( fieldname = 'GBSTK_TXT'   coltext = 'Overall Status' outputlen = 25 just = 'L' )
       " 2. Sales Document (Clickable)
-      ( fieldname = 'VBELN'       coltext = 'Sales Document' hotspot = 'X' outputlen = 15 just = 'C' )
+      ( fieldname = 'VBELN'       coltext = 'Sales Document' hotspot = 'X' outputlen = 15 just = 'L' convexit = 'ALPHA' )
       " 3. Created By
       ( fieldname = 'ERNAM'       coltext = 'Created By'     outputlen = 15 )
       " 4. Time
@@ -9393,7 +10566,15 @@ FORM hc_display_alv.
       " 6. Sales Area (Wider)
       ( fieldname = 'SALES_AREA'  coltext = 'Sales Area' outputlen = 25 )
       " 7. Net Value (Right Aligned)
-      ( fieldname = 'NETWR'       coltext = 'Net Value'      do_sum = 'X' outputlen = 18 )
+      "( fieldname = 'NETWR'       coltext = 'Net Value'      do_sum = 'X' outputlen = 18 )
+      " 7. Net Value [FIX 2: STANDARD FORMATTING]
+    ( fieldname = 'NETWR'
+      coltext    = 'Net Value'
+      do_sum     = 'X'
+      outputlen  = 15
+      cfieldname = 'WAERK'   " Liên kết đơn vị tiền tệ
+      ref_table  = 'VBAK'
+      ref_field  = 'NETWR' )
       " 8. Currency (Left Aligned next to value)
       ( fieldname = 'WAERK'       coltext = 'Curr.'          outputlen = 5 just = 'L' )
   ).
@@ -9403,6 +10584,7 @@ FORM hc_display_alv.
   ls_layo-sel_mode   = 'A'.
   ls_layo-grid_title = 'Recent Sales Documents (Today)'.
   ls_layo-no_toolbar = 'X'.
+  ls_layo-no_rowmark = 'X'.
 
   " IMPORTANT: Disable optimize to allow columns to stretch
   " ls_layo-cwidth_opt = 'X'.
@@ -9470,6 +10652,41 @@ FORM hc_load_html_kpi.
   go_hc_html->show_url( url = lv_url ).
 ENDFORM.
 
+*----------------------------------------------------------------------*
+* FORM: HC_REFRESH_DASHBOARD (NEW)
+* Desc: Reload data without destroying containers
+*----------------------------------------------------------------------*
+FORM hc_refresh_dashboard.
+  " 1. Lấy lại dữ liệu mới nhất từ DB
+  PERFORM hc_fetch_data.
+
+  " 2. Cập nhật lại HTML (KPIs)
+  " Form này đã bao gồm logic tính toán lại % và đẩy vào Viewer
+  PERFORM hc_load_html_kpi.
+
+  " 3. Cập nhật lại ALV (List)
+  IF go_hc_alv IS BOUND.
+    " Cấu trúc giữ vị trí cuộn chuột (Stable Refresh)
+    DATA: ls_stable TYPE lvc_s_stbl.
+    ls_stable-row = 'X'. " Giữ dòng đang chọn
+    ls_stable-col = 'X'. " Giữ cột đang chọn
+
+    " ALV tự động nhận diện gt_hc_alv_data đã thay đổi ở bước 1
+    go_hc_alv->refresh_table_display(
+      EXPORTING
+        is_stable = ls_stable
+      EXCEPTIONS
+        finished  = 1
+        OTHERS    = 2
+    ).
+  ENDIF.
+
+  MESSAGE s094(zsd4_msg).
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&                     REPORTING MONITORING FORM
+*&---------------------------------------------------------------------*
 *&---------------------------------------------------------------------*
 *& Form GET_INITIAL_DATA_SD4
 *&---------------------------------------------------------------------*
@@ -9489,9 +10706,12 @@ FORM get_initial_data_sd4.
   " Gán sang bảng ALV TRƯỚC khi tính toán
   gt_alv_sd4 = gt_static_sd4.
 
+  PERFORM determine_custom_status_sd4.
+
   PERFORM calculate_kpi_sd4.
-  PERFORM prepare_chart_data_sd4.
-  PERFORM process_alv_color_sd4.
+
+  SORT gt_alv_sd4 BY audat DESCENDING vbeln DESCENDING.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -9521,10 +10741,12 @@ FORM get_filtered_data_sd4.
       AND a~spart IN @s_spart
       AND a~erdat IN @s_erdat.
 
+  PERFORM determine_custom_status_sd4.
+
   " Tính lại KPI/Chart theo data mới
   PERFORM calculate_kpi_sd4.
-  PERFORM prepare_chart_data_sd4.
-  PERFORM process_alv_color_sd4.
+  SORT gt_alv_sd4 BY audat DESCENDING vbeln DESCENDING.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -9543,62 +10765,219 @@ FORM calculate_kpi_sd4.
 ENDFORM.
 
 *&---------------------------------------------------------------------*
-*& Form PREPARE_CHART_DATA_SD4
+*& Form DETERMINE_CUSTOM_STATUS_SD4
 *&---------------------------------------------------------------------*
-FORM prepare_chart_data_sd4.
-  CLEAR: gt_chart_sd4.
-  DATA: lv_vkorg TYPE vbak-vkorg.
-  SORT gt_alv_sd4 BY vbeln.
+* Xử lý Logic Overall Status phức tạp dựa trên Document Flow
+*----------------------------------------------------------------------*
+FORM determine_custom_status_sd4.
+  DATA: lt_vbeln TYPE RANGE OF vbak-vbeln, ls_rng LIKE LINE OF lt_vbeln.
 
-  LOOP AT gt_alv_sd4 INTO DATA(ls_row).
-    lv_vkorg = ls_row-vkorg.
-    AT NEW vbeln.
-      IF lv_vkorg = 'CNSG' OR lv_vkorg = 'CNHN' OR lv_vkorg = 'CNDN'.
-        READ TABLE gt_chart_sd4 ASSIGNING FIELD-SYMBOL(<fs_chart>)
-             WITH KEY vkorg = lv_vkorg.
-        IF sy-subrc <> 0.
-          APPEND INITIAL LINE TO gt_chart_sd4 ASSIGNING <fs_chart>.
-          <fs_chart>-vkorg = lv_vkorg.
-        ENDIF.
-        <fs_chart>-total_orders = <fs_chart>-total_orders + 1.
-      ENDIF.
-    ENDAT.
+  " 1. GOM DANH SÁCH SO ĐỂ SELECT (Tối ưu Performance)
+  LOOP AT gt_alv_sd4 INTO DATA(ls_alv).
+    ls_rng-sign = 'I'. ls_rng-option = 'EQ'. ls_rng-low = ls_alv-vbeln.
+    COLLECT ls_rng INTO lt_vbeln.
   ENDLOOP.
-  SORT gt_chart_sd4 BY vkorg.
-ENDFORM.
+  IF lt_vbeln IS INITIAL. RETURN. ENDIF.
 
-*&---------------------------------------------------------------------*
-*& Form PROCESS_ALV_COLOR_SD4
-*&---------------------------------------------------------------------*
-FORM process_alv_color_sd4.
-  DATA: ls_color TYPE lvc_s_scol.
+  " 2. LẤY DỮ LIỆU LUỒNG CHỨNG TỪ (DOCUMENT FLOW)
+  TYPES: BEGIN OF ty_flow,
+           vbelv   TYPE vbfa-vbelv, " Preceding (SO/Del)
+           vbeln   TYPE vbfa-vbeln, " Subsequent (Del/Bill)
+           vbtyp_n TYPE vbfa-vbtyp_n,
+         END OF ty_flow.
+  DATA: lt_flow TYPE TABLE OF ty_flow.
+
+  " A. Lấy Delivery (J) và Invoice (M) từ Order
+  SELECT vbelv, vbeln, vbtyp_n
+    FROM vbfa
+    INTO TABLE @lt_flow
+    WHERE vbelv IN @lt_vbeln
+      AND vbtyp_n IN ( 'J', 'M' ).
+
+  " B. Lấy tiếp Invoice (M) từ Delivery (J) vừa tìm được
+  IF lt_flow IS NOT INITIAL.
+    SELECT vbelv, vbeln, vbtyp_n
+      FROM vbfa
+      APPENDING TABLE @lt_flow
+      FOR ALL ENTRIES IN @lt_flow
+      WHERE vbelv = @lt_flow-vbeln " Lấy tiếp theo Delivery
+        AND vbtyp_n = 'M'.
+  ENDIF.
+
+  " 3. LẤY CHI TIẾT TRẠNG THÁI (HEADER STATUS)
+  " A. Billing Status (VBRK)
+  TYPES: BEGIN OF ty_bill_st,
+           vbeln TYPE vbrk-vbeln,
+           sfakn TYPE vbrk-sfakn, " Cancelled Billing
+           rfbsk TYPE vbrk-rfbsk, " Posting Status (C = Posted FI)
+         END OF ty_bill_st.
+  DATA: lt_bill_st TYPE HASHED TABLE OF ty_bill_st WITH UNIQUE KEY vbeln.
+
+  " B. Delivery Status (LIKP)
+  TYPES: BEGIN OF ty_del_st,
+           vbeln TYPE likp-vbeln,
+           wbstk TYPE likp-wbstk, " Goods Movement Status
+         END OF ty_del_st.
+  DATA: lt_del_st TYPE HASHED TABLE OF ty_del_st WITH UNIQUE KEY vbeln.
+
+  " Collect IDs để select chi tiết
+  DATA: lr_bill TYPE RANGE OF vbrk-vbeln, lr_del TYPE RANGE OF likp-vbeln.
+  CLEAR ls_rng. ls_rng-sign = 'I'. ls_rng-option = 'EQ'.
+
+  LOOP AT lt_flow INTO DATA(ls_f).
+    IF ls_f-vbtyp_n = 'M'. " Billing
+      ls_rng-low = ls_f-vbeln. COLLECT ls_rng INTO lr_bill.
+    ELSEIF ls_f-vbtyp_n = 'J'. " Delivery
+      ls_rng-low = ls_f-vbeln. COLLECT ls_rng INTO lr_del.
+    ENDIF.
+  ENDLOOP.
+
+  " Select Status chi tiết
+  IF lr_bill IS NOT INITIAL.
+    SELECT vbeln, sfakn, rfbsk FROM vbrk INTO TABLE @lt_bill_st WHERE vbeln IN @lr_bill.
+  ENDIF.
+  IF lr_del IS NOT INITIAL.
+    SELECT vbeln, wbstk FROM likp INTO TABLE @lt_del_st WHERE vbeln IN @lr_del.
+  ENDIF.
+
+  " 4. XỬ LÝ LOGIC CHÍNH (LOOP ALV)
   LOOP AT gt_alv_sd4 ASSIGNING FIELD-SYMBOL(<fs_data>).
-    REFRESH <fs_data>-t_color.
-    CASE <fs_data>-gbstk.
-      WHEN 'C'.
-        <fs_data>-gbstk_txt = 'Completed'.
-        ls_color-fname = 'GBSTK_TXT'. ls_color-color-col = 5. ls_color-color-int = 0.
-      WHEN 'B'.
-        <fs_data>-gbstk_txt = 'In Process'.
-        ls_color-fname = 'GBSTK_TXT'. ls_color-color-col = 3. ls_color-color-int = 0.
-      WHEN 'A'.
-        <fs_data>-gbstk_txt = 'Open'.
-        ls_color-fname = 'GBSTK_TXT'. ls_color-color-col = 6. ls_color-color-int = 0.
+    DATA: lv_has_fi   TYPE char1,
+          lv_has_bill TYPE char1,
+          lv_has_del  TYPE char1,
+          lv_wbstk    TYPE likp-wbstk.
+
+    CLEAR: lv_has_fi, lv_has_bill, lv_has_del, lv_wbstk.
+
+    " --- [FIX] CHECK BILLING & FI (Tách vòng lặp để tránh lỗi Syntax) ---
+
+    " Trường hợp 1: Billing tạo trực tiếp từ Order (SO -> Bill)
+    LOOP AT lt_flow INTO ls_f WHERE vbelv = <fs_data>-vbeln AND vbtyp_n = 'M'.
+      READ TABLE lt_bill_st INTO DATA(ls_bst) WITH TABLE KEY vbeln = ls_f-vbeln.
+      IF sy-subrc = 0 AND ls_bst-sfakn IS INITIAL. " Có Bill & Chưa hủy
+        lv_has_bill = 'X'.
+        IF ls_bst-rfbsk = 'C'. lv_has_fi = 'X'. EXIT. ENDIF. " Đã có FI -> Ưu tiên nhất, thoát luôn
+      ENDIF.
+    ENDLOOP.
+
+    " Trường hợp 2: Billing tạo qua Delivery (SO -> Del -> Bill)
+    " Chỉ tìm tiếp nếu chưa thấy FI Document ở trường hợp 1
+    IF lv_has_fi IS INITIAL.
+      " Tìm các Delivery của SO này trước
+      LOOP AT lt_flow INTO DATA(ls_del_ref) WHERE vbelv = <fs_data>-vbeln AND vbtyp_n = 'J'.
+        " Với mỗi Delivery, tìm Billing của nó
+        LOOP AT lt_flow INTO ls_f WHERE vbelv = ls_del_ref-vbeln AND vbtyp_n = 'M'.
+          READ TABLE lt_bill_st INTO ls_bst WITH TABLE KEY vbeln = ls_f-vbeln.
+          IF sy-subrc = 0 AND ls_bst-sfakn IS INITIAL.
+            lv_has_bill = 'X'.
+            IF ls_bst-rfbsk = 'C'. lv_has_fi = 'X'. EXIT. ENDIF.
+          ENDIF.
+        ENDLOOP.
+        IF lv_has_fi = 'X'. EXIT. ENDIF. " Tìm thấy FI rồi thì thoát hết
+      ENDLOOP.
+    ENDIF.
+
+    " --- CHECK DELIVERY (Để lấy trạng thái Goods Movement) ---
+    IF lv_has_bill IS INITIAL.
+      LOOP AT lt_flow INTO ls_f WHERE vbelv = <fs_data>-vbeln AND vbtyp_n = 'J'.
+        lv_has_del = 'X'.
+        READ TABLE lt_del_st INTO DATA(ls_dst) WITH TABLE KEY vbeln = ls_f-vbeln.
+        IF sy-subrc = 0.
+          lv_wbstk = ls_dst-wbstk. " Lấy trạng thái Goods Movement
+        ENDIF.
+        EXIT. " Lấy Delivery đầu tiên tìm thấy
+      ENDLOOP.
+    ENDIF.
+
+    " --- MAPPING STATUS TEXT & ICON (Logic hiển thị) ---
+    CASE <fs_data>-auart.
+        " === NHÓM 1: GIAO NHẬN (ZORR, ZBB, ZFOC, ZRET) ===
+      WHEN 'ZORR' OR 'ZBB' OR 'ZFOC' OR 'ZRET'.
+
+        IF lv_has_fi = 'X'.
+          <fs_data>-gbstk_txt = 'FI Doc created'.
+          <fs_data>-status_icon = icon_payment.
+        ELSEIF lv_has_bill = 'X'.
+          <fs_data>-gbstk_txt = 'Billing created'.
+          <fs_data>-status_icon = icon_display_text.
+
+        ELSEIF lv_has_del = 'X'.
+          IF <fs_data>-auart = 'ZRET'. " Đơn trả hàng
+            IF lv_wbstk = 'C'.
+              <fs_data>-gbstk_txt = 'PGI Posted, ready Billing'.
+              <fs_data>-status_icon = icon_display_text.
+            ELSE.
+              <fs_data>-gbstk_txt = 'Return Del created, ready PGI'.
+              <fs_data>-status_icon = icon_delivery.
+            ENDIF.
+          ELSE. " Đơn bán hàng
+            IF lv_wbstk = 'C'.
+              <fs_data>-gbstk_txt = 'PGI Posted, ready Billing'.
+              <fs_data>-status_icon = icon_display_text.
+            ELSE.
+              <fs_data>-gbstk_txt = 'Delivery created, ready PGI'.
+              <fs_data>-status_icon = icon_delivery.
+            ENDIF.
+          ENDIF.
+
+        ELSE.
+          <fs_data>-gbstk_txt = 'Order created'.
+          <fs_data>-status_icon = icon_order.
+        ENDIF.
+
+        " === NHÓM 2: DỊCH VỤ (ZDR, ZCRR, ZTP...) ===
       WHEN OTHERS.
-        <fs_data>-gbstk_txt = 'Not Relevant'.
-        ls_color-fname = 'GBSTK_TXT'. ls_color-color-col = 2.
+        IF lv_has_fi = 'X'.
+          <fs_data>-gbstk_txt = 'FI Doc created'.
+          <fs_data>-status_icon = icon_payment.
+        ELSEIF lv_has_bill = 'X'.
+          <fs_data>-gbstk_txt = 'Billing created'.
+          <fs_data>-status_icon = icon_display_text.
+        ELSE.
+          <fs_data>-gbstk_txt = 'Ready Billing'.
+          <fs_data>-status_icon = icon_order.
+        ENDIF.
+
     ENDCASE.
-    APPEND ls_color TO <fs_data>-t_color.
   ENDLOOP.
+
 ENDFORM.
+
+
 
 *&---------------------------------------------------------------------*
 *& Form UPDATE_DASHBOARD_UI_SD4
 *&---------------------------------------------------------------------*
 FORM update_dashboard_ui_sd4.
+  " --- 1. KHỞI TẠO CONTAINER & SPLITTER (CHỈ LÀM 1 LẦN) ---
+  IF go_split_sd4 IS INITIAL.
+    " Tạo Custom Container chính
+    CREATE OBJECT go_cc_report
+      EXPORTING
+        container_name = 'CC_REPORT'.
+
+    " Tạo Splitter: Chia làm 2 dòng (Row 1: KPI, Row 2: ALV)
+    CREATE OBJECT go_split_sd4
+      EXPORTING
+        parent  = go_cc_report
+        rows    = 2
+        columns = 1.
+
+    " Lấy tham chiếu 2 vùng container con
+    go_c_top_sd4 = go_split_sd4->get_container( row = 1 column = 1 ).
+    go_c_bot_sd4 = go_split_sd4->get_container( row = 2 column = 1 ).
+
+    " Thiết lập chiều cao cho Header (KPI): 15%
+    go_split_sd4->set_row_height( id = 1 height = 15 ).
+
+    " (Optional) Tắt đường viền cho đẹp
+    go_split_sd4->set_border( border = space ).
+  ENDIF.
+
+  " --- 2. VẼ CÁC THÀNH PHẦN ---
   PERFORM draw_kpi_header_sd4.
-  PERFORM draw_chart_bar_sd4.
   PERFORM draw_alv_grid_sd4.
+
 ENDFORM.
 
 *&---------------------------------------------------------------------*
@@ -9642,77 +11021,6 @@ FORM draw_kpi_header_sd4.
   go_html_kpi_sd4->show_url( url = lv_url ).
 ENDFORM.
 
-*&---------------------------------------------------------------------*
-*& Form DRAW_CHART_BAR_SD4
-*&---------------------------------------------------------------------*
-FORM draw_chart_bar_sd4.
-  DATA: lt_html TYPE TABLE OF char255, ls_html TYPE char255, lv_url TYPE char255.
-  DATA: lv_val_str TYPE string, lv_color TYPE string, lv_row_js TYPE string.
-  DATA: lv_org_name TYPE string.
-
-  IF go_html_cht_sd4 IS INITIAL.
-    CREATE OBJECT go_html_cht_sd4 EXPORTING parent = go_c_mid_sd4.
-  ENDIF.
-
-  DEFINE add_c. ls_html = &1. APPEND ls_html TO lt_html. END-OF-DEFINITION.
-
-  " (Giữ nguyên phần HTML/JS Chart Google cũ của bạn)
-  add_c '<html><head>'.
-  add_c '<script src="https://www.gstatic.com/charts/loader.js"></script>'.
-  add_c '<style>html,body{height:100%;margin:0;padding:5px;overflow:hidden;font-family: "Segoe UI", Arial, sans-serif;} #chart_div{height:100%;}</style>'.
-  add_c '<script>'.
-  add_c 'google.charts.load("current", {packages:["corechart"]});'.
-  add_c 'google.charts.setOnLoadCallback(drawChart);'.
-  add_c 'window.onresize = drawChart;'.
-  add_c 'function drawChart() {'.
-  add_c '  var data = new google.visualization.DataTable();'.
-  add_c '  data.addColumn("string", "Branch Name");'.
-  add_c '  data.addColumn("number", "Orders");'.
-  add_c '  data.addColumn({type: "string", role: "style"});'.
-  add_c '  data.addColumn({type: "number", role: "annotation"});'.
-  add_c '  data.addRows(['.
-
-  LOOP AT gt_chart_sd4 INTO DATA(ls_d).
-    lv_val_str = |{ ls_d-total_orders NUMBER = RAW }|.
-    CONDENSE lv_val_str NO-GAPS.
-    CASE ls_d-vkorg.
-      WHEN 'CNSG'. lv_org_name = 'CN Hồ Chí Minh'. lv_color = '#5C6BC0'.
-      WHEN 'CNHN'. lv_org_name = 'CN Hà Nội'.      lv_color = '#EF5350'.
-      WHEN 'CNDN'. lv_org_name = 'CN Đà Nẵng'.     lv_color = '#FFCA28'.
-      WHEN OTHERS. lv_org_name = ls_d-vkorg.       lv_color = '#BDBDBD'.
-    ENDCASE.
-    lv_row_js = |['{ lv_org_name }', { lv_val_str }, '{ lv_color }', { lv_val_str }],|.
-    add_c lv_row_js.
-  ENDLOOP.
-
-  add_c '  ]);'.
-
-  " 4. Cấu hình Chart tinh tế hơn
-  add_c '  var options = {'.
-  add_c '    title: "Sales Order Volume by Branch",'.
-  add_c '    titleTextStyle: { color: "#444", fontSize: 16, bold: true },'.
-  add_c '    legend: { position: "none" },'.
-  add_c '    chartArea: { width: "85%", height: "75%", top: 40 },'.
-
-  " Trục hoành: Chữ đậm nhẹ, màu xám đen
-  add_c '    hAxis: { textStyle: { color: "#333", fontSize: 11, bold: true } },'.
-
-  " Trục tung: Gridlines nhạt để chart thoáng hơn
-  add_c '    vAxis: { format: "#", gridlines: { color: "#f0f0f0" }, minValue: 0 },'.
-
-  add_c '    bar: { groupWidth: "55%" },'.
-  add_c '    animation: { startup: true, duration: 1200, easing: "out" }'.
-  add_c '  };'.
-
-  add_c '  var chart = new google.visualization.ColumnChart(document.getElementById("chart_div"));'.
-  add_c '  chart.draw(data, options);'.
-  add_c '}'.
-  add_c '</script></head>'.
-  add_c '<body><div id="chart_div"></div></body></html>'.
-
-  go_html_cht_sd4->load_data( IMPORTING assigned_url = lv_url CHANGING data_table = lt_html ).
-  go_html_cht_sd4->show_url( url = lv_url ).
-ENDFORM.
 
 *&---------------------------------------------------------------------*
 *& Form DRAW_ALV_GRID_SD4
@@ -9733,15 +11041,26 @@ FORM draw_alv_grid_sd4.
     ls_fcat-fieldname = &1.
     ls_fcat-scrtext_m = &2.
     ls_fcat-outputlen = &3.
-    IF &1 = 'NETWR_I'.
-      ls_fcat-do_sum = 'X'.
-      ls_fcat-cfieldname = 'WAERK'. " Gắn Currency
+    IF &1 = 'NETWR_I'. ls_fcat-do_sum = 'X'. ls_fcat-cfieldname = 'WAERK'. ENDIF.
+
+    " [NEW] Nếu là cột Icon thì căn giữa
+    IF &1 = 'STATUS_ICON'.
+       ls_fcat-icon = 'X'.
+       ls_fcat-just = 'C'.
+       ls_fcat-scrtext_m = ''. " Icon không cần tiêu đề hoặc để ngắn
     ENDIF.
+
+    IF &1 = 'AUDAT' OR &1 = 'VDATU'.
+      ls_fcat-ref_table = 'VBAK'.
+      ls_fcat-ref_field = &1.
+    ENDIF.
+
     APPEND ls_fcat TO lt_fcat.
   END-OF-DEFINITION.
 
-  add_col 'GBSTK_TXT'  'Overall Stat.'   12.
-  add_col 'VBELN'      'Sales Doc'       10.
+  add_col 'STATUS_ICON' ''              4.  " Cột Icon
+  add_col 'GBSTK_TXT'   'Overall Stat.' 22. " Cột Text (tăng độ rộng)
+  add_col 'VBELN'       'Sales Doc'     10.
   add_col 'AUART'      'Order Type'      5.
   add_col 'AUDAT'      'Doc. Date'       12.
   add_col 'VDATU'      'Req. Del. Date'  10.
@@ -9749,10 +11068,10 @@ FORM draw_alv_grid_sd4.
   add_col 'VTWEG'      'Dis. Channel'    3.
   add_col 'SPART'      'Division'        2.
   add_col 'KUNNR'      'Sold-to'         10.
-  add_col 'NAME1'      'Customer Name'   30.
+  add_col 'NAME1'      'Customer Name'   20.
   add_col 'POSNR'      'Item'            6.
-  add_col 'MATNR'      'Material'        18.
-  add_col 'KWMENG'     'Quantity'        10.
+  add_col 'MATNR'      'Material'        11.
+  add_col 'KWMENG'     'Quantity'        12.
   add_col 'VRKME'      'Unit'            3.
   add_col 'NETWR_I'    'Net Value'       15.
   add_col 'WAERK'      'Currency'        5.
@@ -9760,10 +11079,571 @@ FORM draw_alv_grid_sd4.
   DATA: ls_layout TYPE lvc_s_layo.
   ls_layout-zebra      = 'X'.
   ls_layout-sel_mode   = 'A'.
-  ls_layout-ctab_fname = 'T_COLOR'.
+  "ls_layout-ctab_fname = 'T_COLOR'.
 
   go_alv_sd4->set_table_for_first_display(
     EXPORTING is_layout       = ls_layout
     CHANGING  it_outtab       = gt_alv_sd4
               it_fieldcatalog = lt_fcat ).
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*&             SCREEN 0900 - REPORT DASHBOARD.
+*&---------------------------------------------------------------------*
+
+" --- [1] CLASS IMPLEMENTATION ---
+CLASS lcl_event_handler_0900 IMPLEMENTATION.
+  METHOD on_sapevent.
+    DATA: lv_action  TYPE string,
+          lv_p1      TYPE string,
+          lv_p2      TYPE string,
+          lv_payload TYPE string.
+
+    " Tách action để lấy dữ liệu Filter (nếu có)
+    SPLIT action AT '|' INTO lv_action lv_p1 lv_p2.
+
+    CASE lv_action.
+      WHEN 'FILTER'.
+        CONCATENATE lv_p1 lv_p2 INTO lv_payload SEPARATED BY '|'.
+        IF lv_payload IS INITIAL OR lv_payload = '|'.
+           lv_payload = 'ALL'.
+        ENDIF.
+        PERFORM refresh_data_0900 USING lv_payload.
+
+      WHEN 'CUSTOMER_CLICK'.
+        " --- ĐOẠN SỬA LỖI Ở ĐÂY ---
+        DATA: lv_cust_data TYPE string.
+        lv_cust_data = getdata.
+        PERFORM handle_customer_click_0900 USING lv_cust_data.
+
+    ENDCASE.
+    cl_gui_cfw=>flush( ).
+  ENDMETHOD.
+ENDCLASS.
+
+" --- [2] FORM INIT ---
+FORM init_dashboard_0900.
+  IF go_cc_dashboard_0900 IS INITIAL.
+    CREATE OBJECT go_cc_dashboard_0900
+      EXPORTING container_name = 'CC_DASHBOARD_0900'.
+
+    CREATE OBJECT go_viewer_0900
+      EXPORTING parent = go_cc_dashboard_0900.
+
+    DATA: lt_events TYPE cntl_simple_events, ls_event TYPE cntl_simple_event.
+    ls_event-eventid = go_viewer_0900->m_id_sapevent.
+    ls_event-appl_event = 'X'.
+    APPEND ls_event TO lt_events.
+    go_viewer_0900->set_registered_events( events = lt_events ).
+    SET HANDLER lcl_event_handler_0900=>on_sapevent FOR go_viewer_0900.
+
+    PERFORM refresh_data_0900 USING 'ALL'.
+  ENDIF.
+ENDFORM.
+
+" --- [3] FORM REFRESH DATA ---
+*&---------------------------------------------------------------------*
+*&      Form  REFRESH_DATA_0900
+*&---------------------------------------------------------------------*
+FORM refresh_data_0900 USING p_filter_payload TYPE string.
+
+  " --- [1] TYPE DECLARATION ---
+  TYPES: BEGIN OF ty_chart_item,
+           label TYPE string,
+           value TYPE netwr,
+         END OF ty_chart_item.
+  TYPES: tt_chart_data TYPE STANDARD TABLE OF ty_chart_item WITH EMPTY KEY.
+
+  TYPES: BEGIN OF ty_finance_json,
+           total_sales  TYPE netwr,
+           billed_val   TYPE netwr,
+           total_ar     TYPE netwr,
+           clearing_val TYPE netwr,
+           bill_rate    TYPE string,
+           clear_pct    TYPE string,
+           trend_sales  TYPE tt_netwr,
+           trend_bill   TYPE tt_netwr,
+           trend_clear  TYPE tt_netwr,
+           trend_ar     TYPE tt_netwr,
+           trend_labels TYPE tt_string,
+         END OF ty_finance_json.
+
+  TYPES: BEGIN OF ty_dashboard_json_ext,
+           kpi            TYPE ty_kpi_json,
+           trend_labels   TYPE tt_string,
+           trend_values   TYPE tt_netwr,
+           status_data    TYPE tt_chart_data,
+           region_data    TYPE tt_chart_data,
+           top_cust_names TYPE tt_string,
+           top_customers  TYPE tt_netwr,
+           finance        TYPE ty_finance_json,
+         END OF ty_dashboard_json_ext.
+
+  DATA: ls_json_ext TYPE ty_dashboard_json_ext.
+
+  " --- [2] DATE PARSING ---
+  DATA: lv_date_from_raw TYPE string, lv_date_to_raw TYPE string,
+        lv_date_from_html TYPE string, lv_date_to_html TYPE string,
+        lv_datum_low TYPE sy-datum, lv_datum_high TYPE sy-datum.
+
+  lv_datum_low  = '20100101'. lv_datum_high = sy-datum.
+
+  IF p_filter_payload = 'ALL' OR p_filter_payload IS INITIAL.
+     CLEAR: lv_date_from_html, lv_date_to_html.
+  ELSE.
+     SPLIT p_filter_payload AT '|' INTO lv_date_from_raw lv_date_to_raw.
+     lv_datum_low  = lv_date_from_raw. lv_datum_high = lv_date_to_raw.
+     IF lv_datum_low IS NOT INITIAL.
+       lv_date_from_html = |{ lv_datum_low(4) }-{ lv_datum_low+4(2) }-{ lv_datum_low+6(2) }|.
+     ENDIF.
+     IF lv_datum_high IS NOT INITIAL.
+       lv_date_to_html = |{ lv_datum_high(4) }-{ lv_datum_high+4(2) }-{ lv_datum_high+6(2) }|.
+     ENDIF.
+  ENDIF.
+
+  " --- [3] DATA TABLES ---
+  DATA: lt_orders TYPE TABLE OF ty_sales_raw.
+  DATA: lt_flow_del TYPE SORTED TABLE OF ty_doc_flow WITH NON-UNIQUE KEY vbelv,
+        lt_flow_bil TYPE SORTED TABLE OF ty_doc_flow WITH NON-UNIQUE KEY vbelv.
+
+  TYPES: BEGIN OF ty_fi_item, kunnr TYPE kunnr, bukrs TYPE bukrs, dmbtr TYPE dmbtr, END OF ty_fi_item.
+  DATA: lt_bsid TYPE TABLE OF ty_fi_item, lt_bsad TYPE TABLE OF ty_fi_item.
+  TYPES: BEGIN OF ty_tvko, vkorg TYPE vkorg, bukrs TYPE bukrs, END OF ty_tvko.
+  DATA: lt_tvko TYPE TABLE OF ty_tvko.
+
+  TYPES: BEGIN OF ty_agg_fin_trend,
+           erdat TYPE vbak-erdat,
+           sales TYPE netwr,
+           bill  TYPE netwr,
+           clear TYPE netwr,
+           ar    TYPE netwr,
+         END OF ty_agg_fin_trend.
+  DATA: lt_fin_trend TYPE SORTED TABLE OF ty_agg_fin_trend WITH UNIQUE KEY erdat,
+        ls_fin_trend TYPE ty_agg_fin_trend.
+
+  TYPES: BEGIN OF ty_agg_cust, kunnr TYPE vbak-kunnr, netwr TYPE netwr, END OF ty_agg_cust.
+  DATA: lt_cust_data TYPE SORTED TABLE OF ty_agg_cust WITH UNIQUE KEY kunnr, ls_cust_row TYPE ty_agg_cust.
+
+  DATA: lt_status_agg TYPE HASHED TABLE OF ty_chart_item WITH UNIQUE KEY label,
+        lt_region_agg TYPE HASHED TABLE OF ty_chart_item WITH UNIQUE KEY label,
+        ls_agg_item   TYPE ty_chart_item.
+
+  DATA: lv_sales_sum TYPE netwr, lv_ret_sum TYPE netwr, lv_open_cnt TYPE i.
+  DATA: lv_billed_sum TYPE netwr, lv_ar_sum TYPE netwr, lv_clearing_sum TYPE netwr.
+  RANGES: r_kunnr FOR vbak-kunnr, r_bukrs FOR t001-bukrs, r_augdt FOR bsad-augdt.
+
+  " --- [4] SELECT SALES DATA ---
+  REFRESH r_vkorg. r_vkorg-sign = 'I'. r_vkorg-option = 'EQ'.
+  r_vkorg-low = 'CNSG'. APPEND r_vkorg. r_vkorg-low = 'CNHN'. APPEND r_vkorg. r_vkorg-low = 'CNDN'. APPEND r_vkorg.
+  REFRESH r_erdat. r_erdat-sign = 'I'. r_erdat-option = 'BT'. r_erdat-low = lv_datum_low. r_erdat-high = lv_datum_high. APPEND r_erdat.
+
+  SELECT vbeln, auart, erdat, netwr, kunnr, vkorg
+    INTO CORRESPONDING FIELDS OF TABLE @lt_orders
+    FROM vbak WHERE vkorg IN @r_vkorg AND erdat IN @r_erdat.
+
+  IF lt_orders IS NOT INITIAL.
+    SELECT vkorg, bukrs INTO CORRESPONDING FIELDS OF TABLE @lt_tvko FROM tvko FOR ALL ENTRIES IN @lt_orders WHERE vkorg = @lt_orders-vkorg.
+    SELECT a~vbelv, a~vbeln, a~vbtyp_n, b~rfbsk, b~fksto INTO CORRESPONDING FIELDS OF TABLE @lt_flow_bil
+      FROM vbfa AS a INNER JOIN vbrk AS b ON a~vbeln = b~vbeln FOR ALL ENTRIES IN @lt_orders WHERE a~vbelv = @lt_orders-vbeln AND a~vbtyp_n = 'M' AND b~fksto = @space.
+    SELECT a~vbelv, a~vbeln, a~vbtyp_n, b~wbstk INTO CORRESPONDING FIELDS OF TABLE @lt_flow_del
+      FROM vbfa AS a INNER JOIN likp AS b ON a~vbeln = b~vbeln FOR ALL ENTRIES IN @lt_orders WHERE a~vbelv = @lt_orders-vbeln AND a~vbtyp_n = 'J'.
+
+    LOOP AT lt_orders ASSIGNING FIELD-SYMBOL(<ls_o>).
+      r_kunnr-sign = 'I'. r_kunnr-option = 'EQ'. r_kunnr-low = <ls_o>-kunnr. COLLECT r_kunnr.
+      READ TABLE lt_tvko INTO DATA(ls_tvko) WITH KEY vkorg = <ls_o>-vkorg.
+      IF sy-subrc = 0. r_bukrs-sign = 'I'. r_bukrs-option = 'EQ'. r_bukrs-low = ls_tvko-bukrs. COLLECT r_bukrs. ENDIF.
+    ENDLOOP.
+
+    IF r_kunnr[] IS NOT INITIAL AND r_bukrs[] IS NOT INITIAL.
+      SELECT kunnr, bukrs, dmbtr INTO CORRESPONDING FIELDS OF TABLE @lt_bsid FROM bsid WHERE kunnr IN @r_kunnr AND bukrs IN @r_bukrs.
+      r_augdt = r_erdat.
+      SELECT kunnr, bukrs, dmbtr INTO CORRESPONDING FIELDS OF TABLE @lt_bsad FROM bsad WHERE kunnr IN @r_kunnr AND bukrs IN @r_bukrs AND augdt IN @r_augdt.
+    ENDIF.
+  ENDIF. " <--- ĐÃ SỬA: Dùng ENDIF thay vì ENDLOOP
+
+  " --- [5] LOGIC PROCESSING ---
+  DATA: ls_bill_info LIKE LINE OF lt_flow_bil, ls_del_info  LIKE LINE OF lt_flow_del.
+
+  LOOP AT lt_orders ASSIGNING FIELD-SYMBOL(<ls_ord>).
+    CLEAR: <ls_ord>-status_txt.
+    CLEAR: ls_fin_trend. ls_fin_trend-erdat = <ls_ord>-erdat.
+
+    READ TABLE lt_flow_bil INTO ls_bill_info WITH TABLE KEY vbelv = <ls_ord>-vbeln.
+    IF sy-subrc = 0.
+      IF ls_bill_info-rfbsk = 'C'.
+         <ls_ord>-status_txt = 'FI Doc created'.
+         ls_fin_trend-clear = <ls_ord>-netwr.
+      ELSE.
+         <ls_ord>-status_txt = 'Billing created'.
+      ENDIF.
+      ls_fin_trend-bill = <ls_ord>-netwr.
+      ADD <ls_ord>-netwr TO lv_billed_sum.
+    ELSE.
+      IF <ls_ord>-auart = 'ZORR' OR <ls_ord>-auart = 'ZBB' OR <ls_ord>-auart = 'ZFOC' OR <ls_ord>-auart = 'ZRET'.
+         READ TABLE lt_flow_del INTO ls_del_info WITH TABLE KEY vbelv = <ls_ord>-vbeln.
+         IF sy-subrc = 0.
+           IF <ls_ord>-auart = 'ZRET'.
+             IF ls_del_info-wbstk = 'C'. <ls_ord>-status_txt = 'PGR Posted, ready Billing'. ELSE. <ls_ord>-status_txt = 'Return Del created, ready PGR'. ENDIF.
+           ELSE.
+             IF ls_del_info-wbstk = 'C'. <ls_ord>-status_txt = 'PGI Posted, ready Billing'. ELSE. <ls_ord>-status_txt = 'Delivery created, ready PGI'. ENDIF.
+           ENDIF.
+         ELSE. <ls_ord>-status_txt = 'Order created'. ENDIF.
+      ELSE. <ls_ord>-status_txt = 'Ready Billing'. ENDIF.
+      ls_fin_trend-ar = <ls_ord>-netwr.
+    ENDIF.
+
+    IF <ls_ord>-auart = 'ZRET'. ADD <ls_ord>-netwr TO lv_ret_sum. ELSE. ADD <ls_ord>-netwr TO lv_sales_sum. ENDIF.
+    IF <ls_ord>-status_txt NP 'FI Doc*' AND <ls_ord>-status_txt NP 'Billing*'. ADD 1 TO lv_open_cnt. ENDIF.
+
+    ls_fin_trend-sales = <ls_ord>-netwr.
+    COLLECT ls_fin_trend INTO lt_fin_trend.
+
+    IF <ls_ord>-auart <> 'ZRET'.
+       ls_cust_row-kunnr = <ls_ord>-kunnr. ls_cust_row-netwr = <ls_ord>-netwr. COLLECT ls_cust_row INTO lt_cust_data.
+    ENDIF.
+    CLEAR ls_agg_item. ls_agg_item-label = <ls_ord>-status_txt. ls_agg_item-value = 1. COLLECT ls_agg_item INTO lt_status_agg.
+    CLEAR ls_agg_item.
+    CASE <ls_ord>-vkorg. WHEN 'CNSG'. ls_agg_item-label = 'Ho Chi Minh'. WHEN 'CNHN'. ls_agg_item-label = 'Ha Noi'. WHEN 'CNDN'. ls_agg_item-label = 'Da Nang'. WHEN OTHERS. ls_agg_item-label = <ls_ord>-vkorg. ENDCASE.
+    ls_agg_item-value = <ls_ord>-netwr. COLLECT ls_agg_item INTO lt_region_agg.
+  ENDLOOP.
+
+  " Finance Sums
+  LOOP AT lt_bsid INTO DATA(ls_bsid). ADD ls_bsid-dmbtr TO lv_ar_sum. ENDLOOP.
+  LOOP AT lt_bsad INTO DATA(ls_bsad). ADD ls_bsad-dmbtr TO lv_clearing_sum. ENDLOOP.
+
+  " --- [6] MAPPING JSON ---
+  ls_json_ext-kpi-sales   = |{ lv_sales_sum / 1000000 DECIMALS = 2 }M|.
+  ls_json_ext-kpi-returns = |{ lv_ret_sum / 1000000 DECIMALS = 2 }M|.
+  ls_json_ext-kpi-orders  = |{ lv_open_cnt }|.
+
+  ls_json_ext-finance-total_sales  = lv_sales_sum.
+  ls_json_ext-finance-billed_val   = lv_billed_sum.
+  ls_json_ext-finance-total_ar     = lv_ar_sum.
+  ls_json_ext-finance-clearing_val = lv_clearing_sum.
+
+  IF lv_sales_sum > 0.
+    DATA(lv_rate) = ( lv_billed_sum / lv_sales_sum ) * 100.
+    ls_json_ext-finance-bill_rate = |{ lv_rate DECIMALS = 1 }|.
+  ELSE. ls_json_ext-finance-bill_rate = '0.0'. ENDIF.
+
+  IF ( lv_clearing_sum + lv_ar_sum ) > 0.
+    DATA(lv_pct) = ( lv_clearing_sum / ( lv_clearing_sum + lv_ar_sum ) ) * 100.
+    ls_json_ext-finance-clear_pct = |{ lv_pct DECIMALS = 1 }|.
+  ELSE. ls_json_ext-finance-clear_pct = '0.0'. ENDIF.
+
+  " Map Sparklines Data
+  LOOP AT lt_fin_trend INTO ls_fin_trend.
+    APPEND ls_fin_trend-sales TO ls_json_ext-finance-trend_sales.
+    APPEND ls_fin_trend-bill  TO ls_json_ext-finance-trend_bill.
+    APPEND ls_fin_trend-clear TO ls_json_ext-finance-trend_clear.
+    APPEND ls_fin_trend-ar    TO ls_json_ext-finance-trend_ar.
+
+    DATA(lv_d) = |{ ls_fin_trend-erdat+6(2) }/{ ls_fin_trend-erdat+4(2) }|.
+    APPEND lv_d TO ls_json_ext-finance-trend_labels.
+
+    " Default Sales Trend
+    APPEND ls_fin_trend-sales TO ls_json_ext-trend_values.
+    APPEND lv_d TO ls_json_ext-trend_labels.
+  ENDLOOP.
+
+  LOOP AT lt_status_agg INTO ls_agg_item. APPEND ls_agg_item TO ls_json_ext-status_data. ENDLOOP.
+  LOOP AT lt_region_agg INTO ls_agg_item. APPEND ls_agg_item TO ls_json_ext-region_data. ENDLOOP.
+
+  DATA: lt_cust_std TYPE STANDARD TABLE OF ty_agg_cust. lt_cust_std = lt_cust_data. SORT lt_cust_std BY netwr DESCENDING.
+  DATA: lv_c TYPE i VALUE 0, lv_nm TYPE kna1-name1.
+  LOOP AT lt_cust_std INTO ls_cust_row.
+    lv_c = lv_c + 1. IF lv_c > 10. EXIT. ENDIF.
+    SELECT SINGLE name1 INTO lv_nm FROM kna1 WHERE kunnr = ls_cust_row-kunnr. IF sy-subrc <> 0. lv_nm = ls_cust_row-kunnr. ENDIF.
+    APPEND ls_cust_row-netwr TO ls_json_ext-top_customers. APPEND lv_nm TO ls_json_ext-top_cust_names.
+  ENDLOOP.
+
+  DATA(lv_js_data) = /ui2/cl_json=>serialize( data = ls_json_ext compress = abap_true pretty_name = /ui2/cl_json=>pretty_mode-camel_case ).
+  IF lv_js_data IS INITIAL. lv_js_data = '{}'. ENDIF.
+
+  PERFORM render_html_0900 USING lv_js_data lv_date_from_html lv_date_to_html.
+ENDFORM.
+
+" --- [4] FORM RENDER HTML (SỬ DỤNG NHÁY ĐƠN ĐỂ TRÁNH LỖI SYNTAX) ---
+*&---------------------------------------------------------------------*
+*&      Form  RENDER_HTML_0900
+*&---------------------------------------------------------------------*
+FORM render_html_0900 USING p_json_data TYPE string
+                            p_d1        TYPE string  " Giữ để tương thích
+                            p_d2        TYPE string. " Giữ để tương thích
+  DATA: lv_html TYPE string.
+
+  " --- [1] HTML HEADER & CSS ---
+  lv_html =
+  '<!DOCTYPE html><html><head><meta charset="UTF-8">' &&
+  '<meta http-equiv="X-UA-Compatible" content="IE=edge">' &&
+  '<style>' &&
+  'body { font-family: "72", "Segoe UI", Arial, sans-serif; margin: 0; ' &&
+  '       padding: 10px; background: #edf2f4; height: 95vh; display: flex; ' &&
+  '       gap: 10px; overflow: hidden; color: #32363a; } ' &&
+
+  " Layout
+  '.col-left { flex: 1; background: #fff; display: flex; flex-direction: column; ' &&
+  '            border-radius: 4px; box-shadow: 0 0 2px rgba(0,0,0,0.1); ' &&
+  '            border-right: 1px solid #d9d9d9; padding: 15px; } ' &&
+  '.col-mid  { flex: 3.5; display: flex; flex-direction: column; gap: 10px; } ' &&
+  '.col-right{ flex: 1.2; background: #fff; padding: 15px; border-radius: 4px; ' &&
+  '            box-shadow: 0 0 2px rgba(0,0,0,0.1); display: flex; ' &&
+  '            flex-direction: column; } ' &&
+
+  " Menu Styles (Đã chỉnh margin-top để đẹp hơn khi đứng đầu)
+  '.sb-group { font-size: 12px; font-weight: bold; color: #6a6d70; ' &&
+  '            text-transform: uppercase; margin-bottom: 10px; margin-top: 5px; } ' &&
+  '.list-item { padding: 12px 10px; cursor: pointer; border-left: 3px solid transparent; ' &&
+  '             color: #32363a; font-size: 14px; display: flex; align-items: center; ' &&
+  '             border-bottom: 1px solid #f5f5f5; } ' && " Thêm gạch chân nhẹ cho đẹp
+  '.list-item:hover { background: #f5f7f9; } ' &&
+  '.list-item.selected { background: #eff4f9; border-left-color: #0070f2; ' &&
+  '                     color: #0070f2; font-weight: 600; } ' &&
+  '.icon { margin-right: 12px; width: 20px; text-align: center; font-size: 16px; } ' &&
+
+  " KPI Cards
+  '.kpi-row { display: flex; gap: 10px; height: 110px; flex-shrink: 0; } ' &&
+  '.kpi-card { flex: 1; background: #fff; padding: 15px; border-radius: 4px; ' &&
+  '            box-shadow: 0 0 2px rgba(0,0,0,0.1); display: flex; ' &&
+  '            flex-direction: column; justify-content: center; ' &&
+  '            border-top: 4px solid transparent; } ' &&
+  '.bd-green { border-top-color: #107e3e; } .bd-red { border-top-color: #bb0000; } ' &&
+  '.bd-blue { border-top-color: #0070f2; } ' &&
+  '.kpi-val { font-size: 28px; font-weight: normal; color: #32363a; ' &&
+  '           margin-bottom: 4px; } ' &&
+  '.kpi-tit { font-size: 13px; color: #6a6d70; } ' &&
+
+  " Chart Box
+  '.chart-box { flex: 1; background: #fff; border-radius: 4px; box-shadow: 0 0 2px rgba(0,0,0,0.1); ' &&
+  '             position: relative; overflow: hidden; display: flex; flex-direction: column; } ' &&
+  '.chart-header { padding: 15px; border-bottom: 1px solid #eff4f9; display: flex; ' &&
+  '                justify-content: space-between; align-items: center; height: 30px; flex-shrink: 0; } ' &&
+  '.chart-tit-main { font-size: 16px; font-weight: normal; color: #32363a; } ' &&
+  '.chart-wrap { flex: 1; position: relative; width: 100%; overflow: hidden; padding: 10px; box-sizing: border-box; } ' &&
+
+  " Finance Grid
+  '.fin-grid { display: none; height: 100%; width: 100%; box-sizing: border-box; ' &&
+  '            padding: 10px; grid-template-columns: 1fr 1fr; ' &&
+  '            grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 15px; } ' &&
+  '.fin-card { background: #fff; border: 1px solid #eee; border-radius: 6px; ' &&
+  '            padding: 10px 15px; display: flex; flex-direction: column; ' &&
+  '            position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.03); ' &&
+  '            height: 100%; overflow: hidden; box-sizing: border-box; } ' &&
+  '.fin-head { display: flex; justify-content: space-between; ' &&
+  '            align-items: flex-start; margin-bottom: 2px; } ' &&
+  '.fin-tit { font-size: 12px; color: #666; font-weight: bold; text-transform: uppercase; } ' &&
+  '.fin-pct { font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; } ' &&
+  '.pct-pos { color: #107e3e; background: #dff0d8; } ' &&
+  '.pct-neu { color: #0070f2; background: #e8f0fe; } ' &&
+  '.fin-val { font-size: 22px; font-weight: bold; color: #333; margin-bottom: 5px; } ' &&
+  '.fin-chart-area { flex: 1; position: relative; width: 100%; min-height: 0; } ' &&
+  '</style>' &&
+
+  " Libraries
+  '<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js"></script>' &&
+  '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">' &&
+  '</head><body>'.
+
+  " --- [2] HTML BODY ---
+  lv_html = lv_html &&
+  '<div class="col-left">' &&
+  "  ĐÃ XÓA FILTER SECTION Ở ĐÂY "
+
+  '  <div class="sb-group">View Options</div>' &&
+  '  <div class="list-item chart-opt selected" onclick="switchChart(this, ''TREND'')">' &&
+  '     <span class="icon"><i class="fas fa-chart-line"></i></span> Sales Trend</div>' &&
+  '  <div class="list-item chart-opt" onclick="switchChart(this, ''STATUS'')">' &&
+  '     <span class="icon"><i class="fas fa-chart-pie"></i></span> Order Status</div>' &&
+  '  <div class="list-item chart-opt" onclick="switchChart(this, ''REGION'')">' &&
+  '     <span class="icon"><i class="fas fa-globe-asia"></i></span> By Region</div>' &&
+  '  <div class="list-item chart-opt" onclick="switchChart(this, ''FINANCE'')">' &&
+  '     <span class="icon"><i class="fas fa-coins"></i></span> Finance & Cashflow</div>' &&
+  '</div>' &&
+
+  '<div class="col-mid">' &&
+  ' <div class="kpi-row">' &&
+  '  <div class="kpi-card bd-green"><div class="kpi-tit">Net Sales</div>' &&
+  '      <div class="kpi-val" id="sales">---</div></div>' &&
+  '  <div class="kpi-card bd-red"><div class="kpi-tit">Returns</div>' &&
+  '      <div class="kpi-val" id="ret">---</div></div>' &&
+  '  <div class="kpi-card bd-blue"><div class="kpi-tit">Open Orders</div>' &&
+  '      <div class="kpi-val" id="open">---</div></div>' &&
+  ' </div>' &&
+
+  ' <div class="chart-box">' &&
+  '   <div class="chart-header"><div class="chart-tit-main" id="chartTitle">Sales Trend Analysis</div></div>' &&
+  '   <div class="chart-wrap" id="mainChartWrap"><canvas id="mainChart"></canvas></div>' &&
+
+  '   <div class="fin-grid" id="finGrid">' &&
+  '     <div class="fin-card">' &&
+  '       <div class="fin-head"><span class="fin-tit">Total Revenue</span></div>' &&
+  '       <div class="fin-val" id="f_sales">---</div>' &&
+  '       <div class="fin-chart-area"><canvas id="c_sales"></canvas></div>' &&
+  '     </div>' &&
+  '     <div class="fin-card">' &&
+  '       <div class="fin-head"><span class="fin-tit">Billed Value</span>' &&
+  '           <span class="fin-pct pct-pos" id="f_brate">0%</span></div>' &&
+  '       <div class="fin-val" id="f_billed">---</div>' &&
+  '       <div class="fin-chart-area"><canvas id="c_billed"></canvas></div>' &&
+  '     </div>' &&
+  '     <div class="fin-card">' &&
+  '       <div class="fin-head"><span class="fin-tit">Collected (Cash)</span>' &&
+  '           <span class="fin-pct pct-pos" id="f_crate">0%</span></div>' &&
+  '       <div class="fin-val" id="f_clear">---</div>' &&
+  '       <div class="fin-chart-area"><canvas id="c_clear"></canvas></div>' &&
+  '     </div>' &&
+  '     <div class="fin-card">' &&
+  '       <div class="fin-head"><span class="fin-tit">Open AR</span>' &&
+  '           <span class="fin-pct pct-neu">Pending</span></div>' &&
+  '       <div class="fin-val" id="f_ar">---</div>' &&
+  '       <div class="fin-chart-area"><canvas id="c_ar"></canvas></div>' &&
+  '     </div>' &&
+  '   </div>' &&
+  ' </div>' &&
+  '</div>' &&
+
+  '<div class="col-right">' &&
+  '  <div style="font-weight:bold;margin-bottom:15px;text-align:center;font-size:12px;' &&
+  '              color:#666;text-transform:uppercase">Top 5 Customers</div>' &&
+  '  <div style="flex:1; position:relative"><canvas id="barChart"></canvas></div>' &&
+  '</div>'.
+
+  " --- [3] JAVASCRIPT ---
+  lv_html = lv_html &&
+  '<script>' &&
+  'var sapData = ' && p_json_data && ';' &&
+  'var mainChartInstance = null;' &&
+  'var miniCharts = [];' &&
+
+  " Đã xóa hàm doFilter() vì không còn nút bấm "
+
+  'function drawSpark(ctxId, dataVals, color) {' &&
+  '  return new Chart(document.getElementById(ctxId), {' &&
+  '    type: "line",' &&
+  '    data: { labels: sapData.finance.trendLabels, ' &&
+  '            datasets: [{ data: dataVals, borderColor: color, borderWidth: 2, ' &&
+  '                        pointRadius: 1, fill: false }] },' &&
+  '    options: { responsive: true, maintainAspectRatio: false, legend: {display:false}, ' &&
+  '               scales: { xAxes:[{display:false}], ' &&
+  '                         yAxes:[{display:false, ticks:{beginAtZero:true}}] }, ' &&
+  '               layout: {padding: {top: 5, bottom: 25, left: 5, right: 5}} }' &&
+  '  });' &&
+  '}' &&
+
+  'function switchChart(el, type) {' &&
+  '  document.querySelectorAll(".chart-opt").forEach(i => i.classList.remove("selected"));' &&
+  '  el.classList.add("selected");' &&
+  '  if(mainChartInstance) { mainChartInstance.destroy(); }' &&
+  '  miniCharts.forEach(c => c.destroy()); miniCharts = [];' &&
+
+  '  var mainWrap = document.getElementById("mainChartWrap");' &&
+  '  var finGrid  = document.getElementById("finGrid");' &&
+
+  '  if (type === "FINANCE") {' &&
+  '     mainWrap.style.display = "none";' &&
+  '     finGrid.style.display = "grid";' &&
+  '     document.getElementById("chartTitle").innerText = "Financial Performance Scorecards";' &&
+
+  '     document.getElementById("f_sales").innerText = parseInt(sapData.finance.totalSales).toLocaleString();' &&
+  '     document.getElementById("f_billed").innerText = parseInt(sapData.finance.billedVal).toLocaleString();' &&
+  '     document.getElementById("f_clear").innerText = parseInt(sapData.finance.clearingVal).toLocaleString();' &&
+  '     document.getElementById("f_ar").innerText = parseInt(sapData.finance.totalAr).toLocaleString();' &&
+  '     document.getElementById("f_brate").innerText = "Bill Rate: " + sapData.finance.billRate + "%";' &&
+  '     document.getElementById("f_crate").innerText = "Recovery: " + sapData.finance.clearPct + "%";' &&
+
+  '     miniCharts.push(drawSpark("c_sales", sapData.finance.trendSales, "#3498db"));' &&
+  '     miniCharts.push(drawSpark("c_billed", sapData.finance.trendBill, "#2ecc71"));' &&
+  '     miniCharts.push(drawSpark("c_clear", sapData.finance.trendClear, "#27ae60"));' &&
+  '     miniCharts.push(drawSpark("c_ar", sapData.finance.trendAr, "#e74c3c"));' &&
+
+  '  } else {' &&
+  '     finGrid.style.display = "none";' &&
+  '     mainWrap.style.display = "block";' &&
+  '     var ctx = document.getElementById("mainChart");' &&
+
+  '     if (type === "TREND") {' &&
+  '        document.getElementById("chartTitle").innerText = "Sales Revenue Trend";' &&
+  '        mainChartInstance = new Chart(ctx, { type: "line", ' &&
+  '          data: { labels: sapData.trendLabels, ' &&
+  '                  datasets: [{ label: "Revenue", data: sapData.trendValues, ' &&
+  '                              borderColor: "#0070f2", backgroundColor: "rgba(0,112,242,0.1)", ' &&
+  '                              pointRadius: 3 }] }, ' &&
+  '          options: { responsive: true, maintainAspectRatio: false, legend: {display:false} } });' &&
+
+  '     } else if (type === "STATUS") {' &&
+  '        document.getElementById("chartTitle").innerText = "Order Processing Status";' &&
+  '        var l=[], v=[]; sapData.statusData.forEach(i=>{l.push(i.label);v.push(i.value)});' &&
+  '        mainChartInstance = new Chart(ctx, { type: "doughnut", ' &&
+  '          data: { labels: l, datasets: [{ data: v, backgroundColor: ["#2b78c5","#d04343","#e09d00","#8f6dc8","#45586d"] }] }, ' &&
+  '          options: { responsive: true, maintainAspectRatio: false, legend: {position:"right"} } });' &&
+
+  '     } else if (type === "REGION") {' &&
+  '        document.getElementById("chartTitle").innerText = "Sales by Region";' &&
+  '        var l=[], v=[]; sapData.regionData.forEach(i=>{l.push(i.label);v.push(i.value)});' &&
+  '        mainChartInstance = new Chart(ctx, { type: "bar", ' &&
+  '          data: { labels: l, datasets: [{ label: "Revenue", data: v, backgroundColor: "#0070f2" }] }, ' &&
+  '          options: { responsive: true, maintainAspectRatio: false, legend: {display:false} } });' &&
+  '     }' &&
+  '  }' &&
+  '}' &&
+
+  " Init
+  'try {' &&
+  '  document.getElementById("sales").innerText = sapData.kpi.sales;' &&
+  '  document.getElementById("ret").innerText = sapData.kpi.returns;' &&
+  '  document.getElementById("open").innerText = sapData.kpi.orders;' &&
+  '  switchChart(document.querySelector(".chart-opt"), "TREND");' &&
+  '  new Chart(document.getElementById("barChart"), { type: "bar", ' &&
+  '    data: { labels: sapData.topCustNames, ' &&
+  '            datasets: [{ label: "Sales", data: sapData.topCustomers, ' &&
+  '                        backgroundColor: "#d04343" }] }, ' &&
+  '    options: { responsive: true, maintainAspectRatio: false, legend: {display:false} } });' &&
+  '} catch(e) { document.body.innerHTML += e.message; }' &&
+  '</script></body></html>'.
+
+  " --- [4] LOAD DATA ---
+  DATA: lt_html_tab TYPE TABLE OF w3html.
+  CALL FUNCTION 'SCMS_STRING_TO_FTEXT'
+    EXPORTING text = lv_html TABLES ftext_tab = lt_html_tab.
+
+  DATA: lv_url TYPE c LENGTH 255.
+  go_viewer_0900->load_data( IMPORTING assigned_url = lv_url CHANGING data_table = lt_html_tab ).
+  go_viewer_0900->show_url( url = lv_url ).
+  cl_gui_cfw=>flush( ).
+ENDFORM.
+
+" --- [5] FORM HANDLE CLICK ---
+FORM handle_customer_click_0900 USING p_cust_name TYPE string.
+  DATA: lv_kunnr TYPE kunnr.
+  SELECT SINGLE kunnr INTO lv_kunnr FROM kna1 WHERE name1 = p_cust_name.
+  IF sy-subrc <> 0.
+     lv_kunnr = p_cust_name.
+     CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT' EXPORTING input = lv_kunnr IMPORTING output = lv_kunnr.
+  ENDIF.
+  SET PARAMETER ID 'KUN' FIELD lv_kunnr.
+  CALL TRANSACTION 'VA05' AND SKIP FIRST SCREEN.
+ENDFORM.
+
+FORM perform_save_data.
+
+  " 1. Ép ALV nhả dữ liệu mới nhất vào bảng nội bộ
+  " (Chỉ cần làm cho các Grid cho phép sửa: Validated & Failed)
+
+  " --- Tab Validated ---
+  IF go_grid_hdr_val IS BOUND. go_grid_hdr_val->check_changed_data( ). ENDIF.
+  IF go_grid_itm_val IS BOUND. go_grid_itm_val->check_changed_data( ). ENDIF.
+  IF go_grid_cnd_val IS BOUND. go_grid_cnd_val->check_changed_data( ). ENDIF.
+
+  " --- Tab Failed ---
+  IF go_grid_hdr_fail IS BOUND. go_grid_hdr_fail->check_changed_data( ). ENDIF.
+  IF go_grid_itm_fail IS BOUND. go_grid_itm_fail->check_changed_data( ). ENDIF.
+  IF go_grid_cnd_fail IS BOUND. go_grid_cnd_fail->check_changed_data( ). ENDIF.
+
+  " 2. Gọi hàm đồng bộ xuống DB
+  " (Hàm này bạn đã có rồi: sync_alv_to_staging_tables)
+  PERFORM sync_alv_to_staging_tables.
+
+  " 3. Thông báo
+  MESSAGE 'Data saved successfully to Staging.' TYPE 'S'.
+
 ENDFORM.

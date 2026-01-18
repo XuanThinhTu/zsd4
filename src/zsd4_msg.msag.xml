@@ -536,6 +536,48 @@
      <MSGNR>087</MSGNR>
      <TEXT>Customer &amp; is flagged for deletion.</TEXT>
     </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>088</MSGNR>
+     <TEXT>Sales Order Type contains invalid characters</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>089</MSGNR>
+     <TEXT>Invalid characters in Sales Org</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>090</MSGNR>
+     <TEXT>Invalid characters in Dist. Channel</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>091</MSGNR>
+     <TEXT>Invalid characters in Division</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>092</MSGNR>
+     <TEXT>Customer ID contains invalid characters</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>093</MSGNR>
+     <TEXT>Customer Reference is required for order type &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZSD4_MSG</ARBGB>
+     <MSGNR>094</MSGNR>
+     <TEXT>Dashboard data refreshed!</TEXT>
+    </T100>
    </T100>
   </asx:values>
  </asx:abap>

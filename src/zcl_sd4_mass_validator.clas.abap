@@ -5,6 +5,7 @@ class ZCL_SD4_MASS_VALIDATOR definition
 
 public section.
 
+  types:
 *  TYPES:
 *      BEGIN OF ty_validation_result,
 *        has_error TYPE abap_bool,
@@ -27,43 +28,36 @@ public section.
 *  class-data GT_ERRORS type ZTTY_VALIDATION_ERROR .
 *
 *  class-methods CLEAR_ERRORS .
-
-
    "------------------------------------------------------------
     " Result structure returned to caller
     "------------------------------------------------------------
-    TYPES:
-      BEGIN OF ty_error,
+    BEGIN OF ty_error,
         fieldname TYPE char30,
         message   TYPE bapi_msg,
         temp_id   TYPE char10,
         item_no   TYPE posnr_va,
-      END OF ty_error.
-
-    TYPES:
-      ty_error_tab TYPE STANDARD TABLE OF ty_error WITH DEFAULT KEY.
-
-    TYPES:
-      BEGIN OF ty_validation_result,
+      END OF ty_error .
+  types:
+    ty_error_tab TYPE STANDARD TABLE OF ty_error WITH DEFAULT KEY .
+  types:
+    BEGIN OF ty_validation_result,
         has_error TYPE abap_bool,
         error_tab TYPE ty_error_tab,
-      END OF ty_validation_result.
+      END OF ty_validation_result .
 
     "------------------------------------------------------------
     " PUBLIC METHODS (API for Module Pool)
     "------------------------------------------------------------
-    CLASS-METHODS:
-      validate_header
-        IMPORTING
-          is_header TYPE ztb_so_upload_hd
-        RETURNING
-          VALUE(rs_result) TYPE ty_validation_result,
-
-      validate_item
-        IMPORTING
-          is_item TYPE ztb_so_upload_it
-        RETURNING
-          VALUE(rs_result) TYPE ty_validation_result.
+  class-methods VALIDATE_HEADER
+    importing
+      !IS_HEADER type ZTB_SO_UPLOAD_HD
+    returning
+      value(RS_RESULT) type TY_VALIDATION_RESULT .
+  class-methods VALIDATE_ITEM
+    importing
+      !IS_ITEM type ZTB_SO_UPLOAD_IT
+    returning
+      value(RS_RESULT) type TY_VALIDATION_RESULT .
 protected section.
 private section.
 *  CLASS-METHODS:
@@ -287,7 +281,7 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
         WHERE waers = @is_header-currency.
 
       IF sy-subrc <> 0.
-        MESSAGE e050(zsd4_msg) WITH is_header-currency INTO lv_msg.
+        MESSAGE e043(zsd4_msg) WITH is_header-currency INTO lv_msg.
         append_error(
           EXPORTING
             iv_fieldname = 'CURRENCY'
@@ -317,7 +311,7 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
         WHERE kunnr = @is_header-sold_to_party.
 
       IF sy-subrc <> 0.
-        MESSAGE e020(zsd4_msg) WITH is_header-sold_to_party INTO lv_msg.
+        MESSAGE e017(zsd4_msg) WITH is_header-sold_to_party INTO lv_msg.
         append_error(
           EXPORTING
             iv_fieldname = 'SOLD_TO_PARTY'
@@ -404,7 +398,7 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
         WHERE inco1 = @is_header-incoterms.
 
       IF sy-subrc <> 0.
-        MESSAGE e040(zsd4_msg) WITH is_header-incoterms INTO lv_msg.
+        MESSAGE e038(zsd4_msg) WITH is_header-incoterms INTO lv_msg.
         append_error(
           EXPORTING
             iv_fieldname = 'INCOTERMS'
@@ -421,6 +415,30 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
 
 
   method CHECK_MATERIAL.
+    "------------------------------------------------------------
+  " ITEM: Material master validation
+  "------------------------------------------------------------
+
+    DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-material IS NOT INITIAL.
+
+      SELECT SINGLE matnr
+        FROM mara
+        INTO @DATA(lv_matnr)
+        WHERE matnr = @is_item-material.
+
+      IF sy-subrc <> 0.
+        MESSAGE e052(zsd4_msg) WITH is_item-material INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'MATERIAL'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+
+    ENDIF.
   endmethod.
 
 
@@ -438,7 +456,7 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
         WHERE zterm = @is_header-pmnttrms.
 
       IF sy-subrc <> 0.
-        MESSAGE e030(zsd4_msg) WITH is_header-pmnttrms INTO lv_msg.
+        MESSAGE e036(zsd4_msg) WITH is_header-pmnttrms INTO lv_msg.
         append_error(
           EXPORTING
             iv_fieldname = 'PMNTTRMS'
@@ -454,14 +472,70 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
 
 
   method CHECK_PLANT.
+    "------------------------------------------------------------
+  " ITEM: Plant validation
+  "------------------------------------------------------------
+     DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-plant IS NOT INITIAL.
+
+      SELECT SINGLE werks
+        FROM t001w
+        INTO @DATA(lv_werks)
+        WHERE werks = @is_item-plant.
+
+      IF sy-subrc <> 0.
+        MESSAGE e058(zsd4_msg) WITH is_item-plant INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'PLANT'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+
+    ENDIF.
   endmethod.
 
 
   method CHECK_PRICE.
+    "------------------------------------------------------------
+  " ITEM: Price >= 0
+  "------------------------------------------------------------
+     DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-unit_price IS NOT INITIAL.
+      IF is_item-unit_price < 0.
+        MESSAGE e067(zsd4_msg) WITH is_item-unit_price INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'UNIT_PRICE'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+    ENDIF.
   endmethod.
 
 
   method CHECK_QUANTITY.
+    "------------------------------------------------------------
+  " ITEM: Quantity > 0
+  "------------------------------------------------------------
+
+    DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-quantity IS NOT INITIAL.
+      IF is_item-quantity <= 0.
+        MESSAGE e065(zsd4_msg) WITH is_item-quantity INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'QUANTITY'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+    ENDIF.
   endmethod.
 
 
@@ -562,6 +636,54 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
 
 
   method CHECK_REQUIRED_ITM.
+    "------------------------------------------------------------
+  " ITEM: Required fields
+  "------------------------------------------------------------
+     DATA lv_msg TYPE bapi_msg.
+
+    " Material
+    IF is_item-material IS INITIAL.
+      MESSAGE e010(zsd4_msg) WITH 'Material' INTO lv_msg.
+      append_error(
+        EXPORTING iv_fieldname = 'MATERIAL'
+                  iv_message   = lv_msg
+                  iv_temp_id   = is_item-temp_id
+                  iv_item_no   = is_item-item_no
+        CHANGING  ct_err       = ct_err ).
+    ENDIF.
+
+    " Quantity
+    IF is_item-quantity IS INITIAL.
+      MESSAGE e010(zsd4_msg) WITH 'Quantity' INTO lv_msg.
+      append_error(
+        EXPORTING iv_fieldname = 'QUANTITY'
+                  iv_message   = lv_msg
+                  iv_temp_id   = is_item-temp_id
+                  iv_item_no   = is_item-item_no
+        CHANGING  ct_err       = ct_err ).
+    ENDIF.
+
+    " Plant
+    IF is_item-plant IS INITIAL.
+      MESSAGE e010(zsd4_msg) WITH 'Plant' INTO lv_msg.
+      append_error(
+        EXPORTING iv_fieldname = 'PLANT'
+                  iv_message   = lv_msg
+                  iv_temp_id   = is_item-temp_id
+                  iv_item_no   = is_item-item_no
+        CHANGING  ct_err       = ct_err ).
+    ENDIF.
+
+    " Shipping Point
+    IF is_item-ship_point IS INITIAL.
+      MESSAGE e010(zsd4_msg) WITH 'Shipping Point' INTO lv_msg.
+      append_error(
+        EXPORTING iv_fieldname = 'SHIP_POINT'
+                  iv_message   = lv_msg
+                  iv_temp_id   = is_item-temp_id
+                  iv_item_no   = is_item-item_no
+        CHANGING  ct_err       = ct_err ).
+    ENDIF.
   endmethod.
 
 
@@ -635,18 +757,107 @@ CLASS ZCL_SD4_MASS_VALIDATOR IMPLEMENTATION.
 
 
   method CHECK_SCHEDULE_DATE.
+    "------------------------------------------------------------
+  " ITEM: Schedule line date
+  "------------------------------------------------------------
+    DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-req_date IS NOT INITIAL.
+
+      IF is_item-req_date = '00000000'.
+        MESSAGE e075(zsd4_msg) WITH 'Schedule Date' INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'REQ_DATE'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+
+    ENDIF.
   endmethod.
 
 
   method CHECK_SHIPPING_POINT.
+    "------------------------------------------------------------
+  " ITEM: Shipping point validation
+  "------------------------------------------------------------
+    DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-ship_point IS NOT INITIAL.
+
+      SELECT SINGLE vstel
+        FROM tvst
+        INTO @DATA(lv_vstel)
+        WHERE vstel = @is_item-ship_point.
+
+      IF sy-subrc <> 0.
+        MESSAGE e060(zsd4_msg) WITH is_item-ship_point INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'SHIP_POINT'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+
+    ENDIF.
   endmethod.
 
 
   method CHECK_STORAGE_LOCATION.
+    "------------------------------------------------------------
+  " ITEM: Storage Location validation
+  "------------------------------------------------------------
+    DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-store_loc IS NOT INITIAL.
+
+      SELECT SINGLE lgort
+        FROM t001l
+        INTO @DATA(lv_lgort)
+        WHERE lgort = @is_item-store_loc
+          AND werks = @is_item-plant.
+
+      IF sy-subrc <> 0.
+        MESSAGE e062(zsd4_msg) WITH is_item-store_loc is_item-plant INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'STORE_LOC'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+
+    ENDIF.
   endmethod.
 
 
   method CHECK_UNIT.
+    "------------------------------------------------------------
+  " ITEM: Unit validation
+  "------------------------------------------------------------
+    DATA lv_msg TYPE bapi_msg.
+
+    IF is_item-unit IS NOT INITIAL.
+
+      SELECT SINGLE meinh
+        FROM marm
+        INTO @DATA(lv_unit)
+        WHERE matnr = @is_item-material
+          AND meinh = @is_item-unit.
+
+      IF sy-subrc <> 0.
+        MESSAGE e073(zsd4_msg) WITH is_item-unit INTO lv_msg.
+        append_error(
+          EXPORTING iv_fieldname = 'UNIT'
+                    iv_message   = lv_msg
+                    iv_temp_id   = is_item-temp_id
+                    iv_item_no   = is_item-item_no
+          CHANGING  ct_err       = ct_err ).
+      ENDIF.
+
+    ENDIF.
   endmethod.
 
 

@@ -1,0 +1,6 @@
+PROCESS BEFORE OUTPUT.
+  MODULE status_0900.
+  MODULE init_dashboard_0900.
+*
+PROCESS AFTER INPUT.
+  MODULE user_command_0900.

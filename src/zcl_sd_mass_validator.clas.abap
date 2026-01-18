@@ -22,6 +22,15 @@ public section.
       !IV_FIELDNAME type FIELDNAME
       !IV_MSG_TYPE type SYMSGTY
       !IV_MESSAGE type BAPI_MSG .
+  CLASS-METHODS save_single_error
+      IMPORTING
+        iv_req_id    TYPE zsd_req_id
+        iv_temp_id   TYPE char10
+        iv_item_no   TYPE posnr_va
+        iv_fieldname TYPE fieldname
+        iv_msg_type  TYPE symsgty DEFAULT 'E'
+        iv_message   TYPE string
+        iv_commit    TYPE abap_bool DEFAULT abap_false.
   class-methods EXECUTE_VALIDATION_HDR
     changing
       !CS_HEADER type ZTB_SO_UPLOAD_HD .
@@ -288,8 +297,9 @@ private section.
     changing
       !CS_HEADER type ZTB_SO_UPLOAD_HD .
   " === 4. [CODE BẠN YÊU CẦU] ĐỊNH NGHĨA 'METHODS' (VALIDATE HEADER) ===
-  CLASS-METHODS
-    validate_header_vkorg
+  CLASS-METHODS validate_header_temp_id
+      CHANGING cs_header TYPE ztb_so_upload_hd.
+  CLASS-METHODS validate_header_vkorg
       CHANGING cs_header TYPE ztb_so_upload_hd.
   CLASS-METHODS  validate_header_vtweg
       CHANGING cs_header TYPE ztb_so_upload_hd.
@@ -317,6 +327,9 @@ private section.
       CHANGING cs_header TYPE ztb_so_upload_hd.
    CLASS-METHODS validate_header_order_date
       CHANGING cs_header TYPE ztb_so_upload_hd.
+
+   CLASS-METHODS validate_item_temp_id
+      CHANGING cs_item   TYPE ztb_so_upload_it.
    CLASS-METHODS:
     validate_item_pricing_proc
       IMPORTING is_header TYPE ztb_so_upload_hd " (SỬA: Cần Header)
@@ -378,6 +391,10 @@ private section.
         VALUE(rt_invalid) TYPE abap_bool,
     validate_header_inco2 CHANGING cs_header TYPE ztb_so_upload_hd,
     " [THÊM MỚI] Các method Validate Pricing (Con)
+
+      validate_prc_temp_id
+        CHANGING cs_pricing TYPE ztb_so_upload_pr,
+
       validate_prc_cond_type
         CHANGING cs_pricing TYPE ztb_so_upload_pr,
 
@@ -1134,6 +1151,8 @@ METHOD execute_validation_hdr.
     cs_header-message = ''.
 
     " --- 1. KIỂM TRA BẮT BUỘC (REQUIRED) - CHẠY XUYÊN SUỐT ---
+    " [MỚI] Validate Temp ID đầu tiên
+    CALL METHOD validate_header_temp_id( CHANGING cs_header = cs_header ).
     CALL METHOD validate_header_auart( CHANGING cs_header = cs_header ).
     CALL METHOD validate_header_vkorg( CHANGING cs_header = cs_header ).
     CALL METHOD validate_header_vtweg( CHANGING cs_header = cs_header ).
@@ -1229,6 +1248,9 @@ METHOD execute_validation_hdr.
       lv_header_error = abap_true.
       " (Lưu ý: Không RETURN ở đây để tiếp tục check các field khác của Item)
     ENDIF.
+
+    " 1. Validate Format TempID (Mới thêm)
+   CALL METHOD validate_item_temp_id( CHANGING cs_item = cs_item ).
 
     " --- 3. KIỂM TRA BẮT BUỘC (REQUIRED) ---
     " [SỬA LỖI]: Dùng EXPORTING để gửi is_header vào
@@ -1487,6 +1509,8 @@ METHOD execute_validation_prc.
 
     " --- Validate từng trường ---
 
+    CALL METHOD validate_prc_temp_id( CHANGING cs_pricing = cs_pricing ).
+
     " 1. Condition Type (Quan trọng nhất)
     CALL METHOD validate_prc_cond_type( CHANGING cs_pricing = cs_pricing ).
 
@@ -1646,12 +1670,22 @@ METHOD validate_header_auart.
 *      RETURN.
 *    ENDIF.
 *
-*    IF ls_tvak-vbtyp <> 'C'.
-*      cs_header-status = 'ERROR'. " (Sửa)
-*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '002' WITH lv_auart INTO cs_header-message.
-*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000' iv_fieldname = 'ORDER_TYPE' iv_msg_type = 'E' iv_message = cs_header-message ).
+*    " 3. Check Special Chars (Chỉ cho phép chữ và số)
+*    IF check_special_chars( iv_value = lv_auart ) = abap_true.
+*      cs_header-status = 'ERROR'.
+*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '088' WITH lv_auart INTO cs_header-message.
+*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
+*        iv_fieldname = 'ORDER_TYPE' iv_msg_type = 'E'
+*        iv_message = cs_header-message ).
 *      RETURN.
 *    ENDIF.
+*
+**    IF ls_tvak-vbtyp <> 'C'.
+**      cs_header-status = 'ERROR'. " (Sửa)
+**      MESSAGE ID gc_msgid TYPE 'E' NUMBER '002' WITH lv_auart INTO cs_header-message.
+**      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000' iv_fieldname = 'ORDER_TYPE' iv_msg_type = 'E' iv_message = cs_header-message ).
+**      RETURN.
+**    ENDIF.
 *
 *    IF ls_tvak-sperr IS NOT INITIAL.
 *      cs_header-status = 'ERROR'. " (Sửa)
@@ -1819,6 +1853,15 @@ METHOD validate_header_cust_ref.
 *    lv_auart = cs_header-order_type.
 *    lv_bstnk = cs_header-cust_ref.
 *    lv_kunnr = cs_header-sold_to_party.
+*
+*    " 1. Required
+*    IF cs_header-cust_ref IS INITIAL.
+*      cs_header-status = 'ERROR'.
+*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '093' INTO cs_header-message.
+*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
+*        iv_fieldname = 'CUST_REF' iv_msg_type = 'E' iv_message = 'Customer Reference is required' ).
+*    ENDIF.
+*
 *    SHIFT lv_bstnk LEFT DELETING LEADING space.
 *    SHIFT lv_bstnk RIGHT DELETING TRAILING space.
 *    IF strlen( lv_bstnk ) > 35.
@@ -1865,15 +1908,15 @@ METHOD validate_header_cust_ref.
 *    ENDIF.
 *  ENDMETHOD.
 
-
+*
     CLEAR cs_header-message.
 
-    " 1. Required
-    IF cs_header-cust_ref IS INITIAL.
-      cs_header-status = 'ERROR'.
-      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
-        iv_fieldname = 'CUST_REF' iv_msg_type = 'E' iv_message = 'Customer Reference is required' ).
-    ENDIF.
+*    " 1. Required
+*    IF cs_header-cust_ref IS INITIAL.
+*      cs_header-status = 'ERROR'.
+*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
+*        iv_fieldname = 'CUST_REF' iv_msg_type = 'E' iv_message = 'Customer Reference is required' ).
+*    ENDIF.
 
     " 2. Length Check (Mặc dù structure đã cắt, nhưng nếu muốn báo lỗi thì check raw data từ Excel,
     "    nhưng ở đây ta check trên structure ZTB đã lưu nên nó đã bị cắt rồi).
@@ -2301,30 +2344,115 @@ METHOD validate_header_sales_area.
 *    ENDIF.
 *  ENDMETHOD.
 
+*METHOD validate_header_sales_area.
+*    DATA: ls_tvta  TYPE ty_tvta_buf,
+*          lv_found TYPE abap_bool.
+*
+*    CLEAR: cs_header-message. " <<< ĐÚNG: Chỉ xóa message của field này thôi
+*
+*    " Chỉ check khi cả 3 trường đã có dữ liệu (nếu thiếu thì đã bị bắt ở các hàm trên rồi)
+*    IF cs_header-sales_org IS INITIAL OR cs_header-sales_channel IS INITIAL OR cs_header-sales_div IS INITIAL.
+*      RETURN.
+*    ENDIF.
+*
+*    " Check combination (TVTA)
+*    CALL METHOD buffer_load_tvta(
+*      EXPORTING iv_vkorg = cs_header-sales_org
+*                iv_vtweg = cs_header-sales_channel
+*                iv_spart = cs_header-sales_div
+*      CHANGING  es_tvta = ls_tvta
+*                ev_found = lv_found ).
+*
+*    IF lv_found IS INITIAL.
+*      cs_header-status = 'ERROR'.
+*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '013' WITH cs_header-sales_org cs_header-sales_channel cs_header-sales_div INTO cs_header-message.
+*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000' iv_fieldname = 'SALES_ORG' iv_msg_type = 'E' iv_message = cs_header-message ).
+*      RETURN.
+*    ENDIF.
+*  ENDMETHOD.
+
+
     DATA: ls_tvta  TYPE ty_tvta_buf,
           lv_found TYPE abap_bool.
 
-    CLEAR: cs_header-message. " <<< ĐÚNG: Chỉ xóa message của field này thôi
-
-    " Chỉ check khi cả 3 trường đã có dữ liệu (nếu thiếu thì đã bị bắt ở các hàm trên rồi)
+    " Chỉ check khi cả 3 trường đã có dữ liệu
     IF cs_header-sales_org IS INITIAL OR cs_header-sales_channel IS INITIAL OR cs_header-sales_div IS INITIAL.
       RETURN.
     ENDIF.
 
-    " Check combination (TVTA)
-    CALL METHOD buffer_load_tvta(
-      EXPORTING iv_vkorg = cs_header-sales_org
-                iv_vtweg = cs_header-sales_channel
-                iv_spart = cs_header-sales_div
-      CHANGING  es_tvta = ls_tvta
-                ev_found = lv_found ).
+    " ========================================================================
+    " 1. [THÊM MỚI]: Check Assignment Sales Org -> Dist. Channel (Bảng TVKOV)
+    " ========================================================================
+    " Đây chính là cái bắt lỗi "Not allowed" mà bạn đang gặp
+    SELECT SINGLE vkorg FROM tvkov
+      INTO @DATA(lv_dummy_kov)
+      WHERE vkorg = @cs_header-sales_org
+        AND vtweg = @cs_header-sales_channel.
+
+    IF sy-subrc <> 0.
+      cs_header-status = 'ERROR'.
+      " Message: For sales org &1, dist. channel &2 is not allowed
+      cs_header-message = |For sales org { cs_header-sales_org }, dist. channel { cs_header-sales_channel } is not allowed|.
+
+      CALL METHOD add_error(
+          iv_temp_id   = cs_header-temp_id
+          iv_item_no   = '000000'
+          iv_fieldname = 'SALES_CHANNEL'  " Hoặc SALES_ORG
+          iv_msg_type  = 'E'
+          iv_message   = cs_header-message ).
+      RETURN.
+    ENDIF.
+
+    " ========================================================================
+    " 2. [THÊM MỚI]: Check Assignment Sales Org -> Division (Bảng TVKOS)
+    " ========================================================================
+    " Tương tự, check xem Division này có được phép dùng cho Sales Org này không
+    SELECT SINGLE vkorg FROM tvkos
+      INTO @DATA(lv_dummy_kos)
+      WHERE vkorg = @cs_header-sales_org
+        AND spart = @cs_header-sales_div.
+
+    IF sy-subrc <> 0.
+      cs_header-status = 'ERROR'.
+      cs_header-message = |For sales org { cs_header-sales_org }, division { cs_header-sales_div } is not allowed|.
+
+      CALL METHOD add_error(
+          iv_temp_id   = cs_header-temp_id
+          iv_item_no   = '000000'
+          iv_fieldname = 'SALES_DIV'
+          iv_msg_type  = 'E'
+          iv_message   = cs_header-message ).
+      RETURN.
+    ENDIF.
+
+    " ========================================================================
+    " 3. Check Combination (TVTA) - Logic cũ
+    " ========================================================================
+    " Check xem tổ hợp 3 cái này có được khai báo Setup Sales Area không
+    CALL METHOD buffer_load_tvta
+      EXPORTING
+        iv_vkorg = cs_header-sales_org
+        iv_vtweg = cs_header-sales_channel
+        iv_spart = cs_header-sales_div
+      CHANGING
+        es_tvta  = ls_tvta
+        ev_found = lv_found.
 
     IF lv_found IS INITIAL.
       cs_header-status = 'ERROR'.
-      MESSAGE ID gc_msgid TYPE 'E' NUMBER '013' WITH cs_header-sales_org cs_header-sales_channel cs_header-sales_div INTO cs_header-message.
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '013'
+        WITH cs_header-sales_org cs_header-sales_channel cs_header-sales_div
+        INTO cs_header-message.
       CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000' iv_fieldname = 'SALES_ORG' iv_msg_type = 'E' iv_message = cs_header-message ).
       RETURN.
     ENDIF.
+
+    " Nếu đến đây mà không lỗi -> OK
+    IF cs_header-status IS INITIAL.
+       cs_header-status = 'READY'.
+       cs_header-message = 'Sales Area is valid.'.
+    ENDIF.
+
   ENDMETHOD.
 
 
@@ -2410,7 +2538,18 @@ METHOD validate_header_sold_to_party.
 *      RETURN.
 *    ENDIF.
 *
-*    " 2. Existence in KNA1
+*        " 2. Check Special (Trước khi convert)
+*    " Customer ID chỉ nên chứa số hoặc chữ cái in hoa (nếu là mã ngoài)
+*    IF check_special_chars( iv_value = cs_header-sold_to_party ) = abap_true.
+*       cs_header-status = 'ERROR'.
+*       MESSAGE ID gc_msgid TYPE 'E' NUMBER '092' INTO cs_header-message.
+*       CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
+*         iv_fieldname = 'SOLD_TO_PARTY' iv_msg_type = 'E'
+*         iv_message = cs_header-message ).
+*       RETURN.
+*    ENDIF.
+*
+*    " 3. Existence in KNA1
 *    CALL METHOD buffer_load_kna1( EXPORTING iv_kunnr = lv_kunnr CHANGING es_kna1 = ls_kna1 ev_found = lv_found ).
 *    IF lv_found IS INITIAL.
 *      cs_header-status = 'ERROR'.
@@ -2419,7 +2558,7 @@ METHOD validate_header_sold_to_party.
 *      RETURN.
 *    ENDIF.
 *
-*    " 3. Check Blocked (LOEVM)
+*    " 4. Check Blocked (LOEVM)
 *    IF ls_kna1-loevm = 'X'.
 *      cs_header-status = 'ERROR'.
 *      MESSAGE ID gc_msgid TYPE 'E' NUMBER '087' WITH lv_kunnr INTO cs_header-message.
@@ -2427,7 +2566,7 @@ METHOD validate_header_sold_to_party.
 *      RETURN.
 *    ENDIF.
 *
-*    " 4. Check Sales Area Extension (KNVV)
+*    " 5. Check Sales Area Extension (KNVV)
 *    IF cs_header-sales_org IS NOT INITIAL. " Chỉ check nếu có Sales Area
 *      CALL METHOD buffer_load_knvv(
 *        EXPORTING iv_kunnr = lv_kunnr iv_vkorg = cs_header-sales_org iv_vtweg = cs_header-sales_channel iv_spart = cs_header-sales_div
@@ -2522,6 +2661,15 @@ METHOD validate_header_spart.
 *      cs_header-status = 'ERROR'.
 *      MESSAGE ID gc_msgid TYPE 'E' NUMBER '010' INTO cs_header-message.
 *      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000' iv_fieldname = 'SALES_DIV' iv_msg_type = 'E' iv_message = cs_header-message ).
+*      RETURN.
+*    ENDIF.
+*
+*    " 2. Special Chars
+*    IF check_special_chars( iv_value = lv_spart ) = abap_true.
+*      cs_header-status = 'ERROR'.
+*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '091' INTO cs_header-message.
+*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
+*        iv_fieldname = 'SALES_DIV' iv_msg_type = 'E' iv_message =  cs_header-message ).
 *      RETURN.
 *    ENDIF.
 *
@@ -2729,6 +2877,15 @@ METHOD validate_header_vkorg.
 *      RETURN.
 *    ENDIF.
 *
+*    " 2. Special Chars
+*    IF check_special_chars( iv_value = lv_vkorg ) = abap_true.
+*      cs_header-status = 'ERROR'.
+*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '089' WITH lv_vkorg INTO cs_header-message. " E007: Not found
+*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
+*        iv_fieldname = 'SALES_ORG' iv_msg_type = 'E' iv_message = cs_header-message ).
+*      RETURN.
+*    ENDIF.
+*
 *    " 2. Existence Check (TVKO)
 *    CALL METHOD buffer_load_tvko( EXPORTING iv_vkorg = lv_vkorg CHANGING es_tvko = ls_tvko ev_found = lv_found ).
 *    IF lv_found IS INITIAL.
@@ -2813,6 +2970,15 @@ METHOD validate_header_vtweg.
 *      cs_header-status = 'ERROR'.
 *      MESSAGE ID gc_msgid TYPE 'E' NUMBER '008' INTO cs_header-message.
 *      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000' iv_fieldname = 'SALES_CHANNEL' iv_msg_type = 'E' iv_message = cs_header-message ).
+*      RETURN.
+*    ENDIF.
+*
+*    " 2. Special Chars
+*    IF check_special_chars( iv_value = lv_vtweg ) = abap_true.
+*      cs_header-status = 'ERROR'.
+*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '090' WITH lv_vtweg INTO cs_header-message.
+*      CALL METHOD add_error( iv_temp_id = cs_header-temp_id iv_item_no = '000000'
+*        iv_fieldname = 'SALES_CHANNEL' iv_msg_type = 'E' iv_message = cs_header-message ).
 *      RETURN.
 *    ENDIF.
 *
@@ -2932,112 +3098,112 @@ METHOD validate_item_material.
 *    ENDIF.
 *  ENDMETHOD.
 
-*METHOD validate_item_material.
-*    DATA: lv_matnr TYPE mara-matnr,
-*          lv_vkorg TYPE vbak-vkorg,
-*          lv_vtweg TYPE vbak-vtweg,
-*          ls_mara  TYPE ty_mara_buf,
-*          ls_mvke  TYPE ty_mvke_buf,
-*          lv_found TYPE abap_bool.
-*
-*    CLEAR: cs_item-message.
-*
-*
-*    " [SỬA LỖI]: Dùng tên trường MATERIAL
-*    lv_matnr = cs_item-material.
-*    SHIFT lv_matnr LEFT DELETING LEADING space.
-*    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-*      EXPORTING input = lv_matnr IMPORTING output = lv_matnr.
-*
-*    " 1. Required Check
-*    IF lv_matnr IS INITIAL.
-*      cs_item-status = 'ERROR'.
-*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '051' INTO cs_item-message.
-*      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
-*      RETURN.
-*    ENDIF.
-*
-*    " 2. Check Existence (MARA)
-*    CALL METHOD buffer_load_mara( EXPORTING iv_matnr = lv_matnr CHANGING es_mara = ls_mara ev_found = lv_found ).
-*    IF lv_found IS INITIAL.
-*      cs_item-status = 'ERROR'.
-*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '052' WITH lv_matnr INTO cs_item-message.
-*      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
-*      RETURN.
-*    ENDIF.
-*
-*    " 3. Check Blocked (MARA-LVORM)
-*    IF ls_mara-lvorm = 'X'.
-*      cs_item-status = 'ERROR'.
-*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '053' WITH lv_matnr INTO cs_item-message.
-*      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
-*      RETURN.
-*    ENDIF.
-*
-*    " 4. Check Sales View (MVKE)
+    DATA: lv_matnr TYPE mara-matnr,
+          lv_vkorg TYPE vbak-vkorg,
+          lv_vtweg TYPE vbak-vtweg,
+          ls_mara  TYPE ty_mara_buf,
+          ls_mvke  TYPE ty_mvke_buf,
+          lv_found TYPE abap_bool.
+
+    CLEAR: cs_item-message.
+
+
+    " [SỬA LỖI]: Dùng tên trường MATERIAL
+    lv_matnr = cs_item-material.
+    SHIFT lv_matnr LEFT DELETING LEADING space.
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING input = lv_matnr IMPORTING output = lv_matnr.
+
+    " 1. Required Check
+    IF lv_matnr IS INITIAL.
+      cs_item-status = 'ERROR'.
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '051' INTO cs_item-message.
+      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
+      RETURN.
+    ENDIF.
+
+    " 2. Check Existence (MARA)
+    CALL METHOD buffer_load_mara( EXPORTING iv_matnr = lv_matnr CHANGING es_mara = ls_mara ev_found = lv_found ).
+    IF lv_found IS INITIAL.
+      cs_item-status = 'ERROR'.
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '052' WITH lv_matnr INTO cs_item-message.
+      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
+      RETURN.
+    ENDIF.
+
+    " 3. Check Blocked (MARA-LVORM)
+    IF ls_mara-lvorm = 'X'.
+      cs_item-status = 'ERROR'.
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '053' WITH lv_matnr INTO cs_item-message.
+      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
+      RETURN.
+    ENDIF.
+
+    " 4. Check Sales View (MVKE)
 *    IF is_header IS INITIAL OR is_header-status = 'ERROR'.
 *      cs_item-status = 'ERROR'.
 *      MESSAGE ID gc_msgid TYPE 'E' NUMBER '084' INTO cs_item-message.
 *      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
 *      RETURN.
 *    ENDIF.
-*
-*    lv_vkorg = is_header-sales_org.
-*    lv_vtweg = is_header-sales_channel.
-*
-*    CALL METHOD buffer_load_mvke( EXPORTING iv_matnr = lv_matnr iv_vkorg = lv_vkorg iv_vtweg = lv_vtweg CHANGING es_mvke = ls_mvke ev_found = lv_found ).
-*    IF lv_found IS INITIAL.
-*      cs_item-status = 'ERROR'.
-*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '054' WITH lv_matnr lv_vkorg lv_vtweg INTO cs_item-message.
-*      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
-*      RETURN.
-*    ENDIF.
-*
-*    " 5. Check Blocked in Sales Area (MVKE-LVORM)
-*    IF ls_mvke-lvorm = 'X'.
-*      cs_item-status = 'ERROR'.
-*      MESSAGE ID gc_msgid TYPE 'E' NUMBER '055' WITH lv_matnr INTO cs_item-message.
-*      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
-*      RETURN.
-*    ENDIF.
-*
-**    IF cs_item-status IS INITIAL.
-**      cs_item-status = 'READY'.
-**      cs_item-message = |Material { lv_matnr } is valid.|.
-**    ENDIF.
-*  ENDMETHOD.
 
-    CLEAR cs_item-message.
+    lv_vkorg = is_header-sales_org.
+    lv_vtweg = is_header-sales_channel.
 
-    " 1. Check Special Chars (Bật iv_allow_space = 'X')
-    IF check_special_chars( iv_value = cs_item-material iv_allow_space = abap_true ) = abap_true.
-       cs_item-status = 'ERROR'.
-       CALL METHOD add_error(
-          iv_temp_id   = cs_item-temp_id
-          iv_item_no   = cs_item-item_no
-          iv_fieldname = 'MATERIAL'
-          iv_msg_type  = 'E'
-          iv_message   = 'Material Number contains invalid characters' ).
-       RETURN.
-    ENDIF.
-
-    " 2. Alpha Conversion (Giữ nguyên)
-    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
-      EXPORTING input  = cs_item-material
-      IMPORTING output = cs_item-material.
-
-    " 3. Required Check (Giữ nguyên)
-    IF cs_item-material IS INITIAL.
+    CALL METHOD buffer_load_mvke( EXPORTING iv_matnr = lv_matnr iv_vkorg = lv_vkorg iv_vtweg = lv_vtweg CHANGING es_mvke = ls_mvke ev_found = lv_found ).
+    IF lv_found IS INITIAL.
       cs_item-status = 'ERROR'.
-      CALL METHOD add_error(
-          iv_temp_id   = cs_item-temp_id
-          iv_item_no   = cs_item-item_no
-          iv_fieldname = 'MATERIAL'
-          iv_msg_type  = 'E'
-          iv_message   = 'Material is required' ).
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '054' WITH lv_matnr lv_vkorg lv_vtweg INTO cs_item-message.
+      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
       RETURN.
     ENDIF.
 
+    " 5. Check Blocked in Sales Area (MVKE-LVORM)
+    IF ls_mvke-lvorm = 'X'.
+      cs_item-status = 'ERROR'.
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '055' WITH lv_matnr INTO cs_item-message.
+      CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no iv_fieldname = 'MATERIAL' iv_msg_type = 'E' iv_message = cs_item-message ).
+      RETURN.
+    ENDIF.
+
+*    IF cs_item-status IS INITIAL.
+*      cs_item-status = 'READY'.
+*      cs_item-message = |Material { lv_matnr } is valid.|.
+*    ENDIF.
+
+*METHOD validate_item_material.
+*    CLEAR cs_item-message.
+*
+*    " 1. Check Special Chars (Bật iv_allow_space = 'X')
+*    IF check_special_chars( iv_value = cs_item-material iv_allow_space = abap_true ) = abap_true.
+*       cs_item-status = 'ERROR'.
+*       CALL METHOD add_error(
+*          iv_temp_id   = cs_item-temp_id
+*          iv_item_no   = cs_item-item_no
+*          iv_fieldname = 'MATERIAL'
+*          iv_msg_type  = 'E'
+*          iv_message   = 'Material Number contains invalid characters' ).
+*       RETURN.
+*    ENDIF.
+*
+*    " 2. Alpha Conversion (Giữ nguyên)
+*    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+*      EXPORTING input  = cs_item-material
+*      IMPORTING output = cs_item-material.
+*
+*    " 3. Required Check (Giữ nguyên)
+*    IF cs_item-material IS INITIAL.
+*      cs_item-status = 'ERROR'.
+*      CALL METHOD add_error(
+*          iv_temp_id   = cs_item-temp_id
+*          iv_item_no   = cs_item-item_no
+*          iv_fieldname = 'MATERIAL'
+*          iv_msg_type  = 'E'
+*          iv_message   = 'Material is required' ).
+*      RETURN.
+*    ENDIF.
+*
+*  ENDMETHOD.
   ENDMETHOD.
 
 
@@ -3162,7 +3328,7 @@ METHOD validate_item_plant.
     CALL METHOD buffer_load_t001w( EXPORTING iv_werks = lv_werks CHANGING es_t001w = ls_t001w ev_found = lv_found ).
     IF lv_found IS INITIAL.
       cs_item-status = 'ERROR'.
-      MESSAGE ID gc_msgid TYPE 'E' NUMBER '071' WITH lv_werks INTO cs_item-message.
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '058' WITH lv_werks INTO cs_item-message.
       CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no
         iv_fieldname = 'PLANT' iv_msg_type = 'E' iv_message = cs_item-message ).
       RETURN.
@@ -3264,7 +3430,7 @@ METHOD validate_item_quantity.
 *
 *    CLEAR: cs_item-message.
 *
-*
+*        " 1. Required Check
 *    IF cs_item-quantity IS INITIAL.
 *      cs_item-status = 'ERROR'.
 *      MESSAGE ID gc_msgid TYPE 'E' NUMBER '063' INTO cs_item-message.
@@ -3443,7 +3609,7 @@ METHOD validate_item_ship_point.
     CALL METHOD buffer_load_tvst( EXPORTING iv_vstel = lv_vstel CHANGING es_tvst = ls_tvst ev_found = lv_found ).
     IF lv_found IS INITIAL.
       cs_item-status = 'ERROR'.
-      MESSAGE ID gc_msgid TYPE 'E' NUMBER '081' WITH lv_vstel INTO cs_item-message.
+      MESSAGE ID gc_msgid TYPE 'E' NUMBER '060' WITH lv_vstel INTO cs_item-message.
       CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no
         iv_fieldname = 'SHIP_POINT' iv_msg_type = 'E' iv_message = cs_item-message ).
       RETURN.
@@ -3539,7 +3705,7 @@ METHOD validate_item_store_loc.
       CALL METHOD buffer_load_t001l( EXPORTING iv_werks = lv_werks iv_lgort = lv_lgort CHANGING es_t001l = ls_t001l ev_found = lv_found ).
       IF lv_found IS INITIAL.
         cs_item-status = 'ERROR'.
-        MESSAGE ID gc_msgid TYPE 'E' NUMBER '091' WITH lv_lgort lv_werks INTO cs_item-message.
+        MESSAGE ID gc_msgid TYPE 'E' NUMBER '062' WITH lv_lgort lv_werks INTO cs_item-message.
         CALL METHOD add_error( iv_temp_id = cs_item-temp_id iv_item_no = cs_item-item_no
           iv_fieldname = 'STORE_LOC' iv_msg_type = 'E' iv_message = cs_item-message ).
         RETURN.
@@ -3779,4 +3945,230 @@ METHOD validate_prc_per.
           iv_message   = |Condition UoM { cs_pricing-uom } is not valid| ).
     ENDIF.
   ENDMETHOD.
+
+
+METHOD save_single_error.
+    DATA: ls_log TYPE ztb_so_error_log.
+
+    " 1. Kiểm tra xem lỗi này đã tồn tại chưa (để tránh duplicate key dump)
+    SELECT SINGLE * FROM ztb_so_error_log
+      INTO ls_log
+      WHERE req_id    = iv_req_id
+        AND temp_id   = iv_temp_id
+        AND item_no   = iv_item_no
+        AND fieldname = iv_fieldname.
+
+    IF sy-subrc = 0.
+      " CASE A: Đã tồn tại -> Nối thêm thông báo vào dòng cũ
+      " Ví dụ: 'Lỗi A' -> 'Lỗi A / Lỗi B'
+      ls_log-message = |{ ls_log-message } / { iv_message }|.
+
+      " Cắt bớt nếu quá dài (vì trường message trong DB có giới hạn, ví dụ 220 char)
+      IF strlen( ls_log-message ) > 220.
+         ls_log-message = ls_log-message(220).
+      ENDIF.
+
+      " Cập nhật lại User/Date mới nhất
+      ls_log-log_user = sy-uname.
+      ls_log-log_date = sy-datum.
+      ls_log-msg_type = iv_msg_type. " Cập nhật loại lỗi (ví dụ E đè W)
+
+      MODIFY ztb_so_error_log FROM ls_log.
+
+    ELSE.
+      " CASE B: Chưa tồn tại -> Insert mới
+      CLEAR ls_log.
+      ls_log-req_id    = iv_req_id.
+      ls_log-temp_id   = iv_temp_id.
+      ls_log-item_no   = iv_item_no.
+      ls_log-fieldname = iv_fieldname.
+      ls_log-msg_type  = iv_msg_type.
+      ls_log-message   = iv_message.
+
+      " Thông tin quản trị
+      ls_log-log_user  = sy-uname.
+      ls_log-log_date  = sy-datum.
+      ls_log-status    = 'UNFIXED'.
+
+      INSERT ztb_so_error_log FROM ls_log.
+    ENDIF.
+
+    " 3. Commit nếu được yêu cầu (thường dùng khi gọi lẻ tẻ)
+    IF iv_commit = abap_true.
+      COMMIT WORK.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+METHOD validate_header_temp_id.
+  " IMPORTING/CHANGING cs_header TYPE ztb_so_upload_hd
+
+  " [ĐÃ SỬA]: Khai báo đúng kiểu BAPI_MSG để khớp với tham số IV_MESSAGE
+  DATA: lv_msg    TYPE bapi_msg,
+        lv_suffix TYPE string,
+        lv_len    TYPE i.
+
+  " 1. Check Empty (Bắt buộc)
+  IF cs_header-temp_id IS INITIAL.
+    lv_msg = 'Temp ID is required.'.
+    add_error( iv_temp_id   = cs_header-temp_id
+               iv_item_no   = '000000'
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ). " Giờ đã tương thích kiểu
+    cs_header-status = 'ERROR'.
+    RETURN.
+  ENDIF.
+
+  " 2. Check Prefix 'H'
+  IF cs_header-temp_id(1) <> 'H'.
+    lv_msg = |Invalid format '{ cs_header-temp_id }'. Must start with 'H' (e.g., H001).|.
+    add_error( iv_temp_id   = cs_header-temp_id
+               iv_item_no   = '000000'
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_header-status = 'ERROR'.
+  ENDIF.
+
+  " 3. Check Length & Numeric Suffix
+  lv_len = strlen( cs_header-temp_id ).
+
+  IF lv_len < 2.
+    lv_msg = 'Temp ID is too short (Format Hxxx).'.
+    add_error( iv_temp_id   = cs_header-temp_id
+               iv_item_no   = '000000'
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_header-status = 'ERROR'.
+  ELSE.
+    lv_suffix = cs_header-temp_id+1.
+    IF lv_suffix CN '0123456789'.
+       lv_msg = |Invalid format '{ cs_header-temp_id }'. Suffix must be numeric.|.
+       add_error( iv_temp_id   = cs_header-temp_id
+                  iv_item_no   = '000000'
+                  iv_fieldname = 'TEMP_ID'
+                  iv_msg_type  = 'E'
+                  iv_message   = lv_msg ).
+       cs_header-status = 'ERROR'.
+    ENDIF.
+  ENDIF.
+
+ENDMETHOD.
+
+
+METHOD validate_item_temp_id.
+  " CHANGING cs_item TYPE ztb_so_upload_it
+
+  DATA: lv_msg    TYPE bapi_msg, " Nhớ dùng BAPI_MSG để tránh lỗi type
+        lv_suffix TYPE string,
+        lv_len    TYPE i.
+
+  " 1. Check Empty
+  IF cs_item-temp_id IS INITIAL.
+    lv_msg = 'Temp ID is required for Item.'.
+    add_error( iv_temp_id   = cs_item-temp_id
+               iv_item_no   = cs_item-item_no
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_item-status = 'ERROR'.
+    RETURN.
+  ENDIF.
+
+  " 2. Check Prefix 'H'
+  IF cs_item-temp_id(1) <> 'H'.
+    lv_msg = |Invalid Item Temp ID '{ cs_item-temp_id }'. Must start with 'H'.|.
+    add_error( iv_temp_id   = cs_item-temp_id
+               iv_item_no   = cs_item-item_no
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_item-status = 'ERROR'.
+  ENDIF.
+
+  " 3. Check Length & Numeric Suffix
+  lv_len = strlen( cs_item-temp_id ).
+
+  IF lv_len < 2.
+    lv_msg = 'Temp ID is too short.'.
+    add_error( iv_temp_id   = cs_item-temp_id
+               iv_item_no   = cs_item-item_no
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_item-status = 'ERROR'.
+  ELSE.
+    lv_suffix = cs_item-temp_id+1.
+    IF lv_suffix CN '0123456789'.
+       lv_msg = |Invalid format '{ cs_item-temp_id }'. Suffix must be numeric.|.
+       add_error( iv_temp_id   = cs_item-temp_id
+                  iv_item_no   = cs_item-item_no
+                  iv_fieldname = 'TEMP_ID'
+                  iv_msg_type  = 'E'
+                  iv_message   = lv_msg ).
+       cs_item-status = 'ERROR'.
+    ENDIF.
+  ENDIF.
+
+ENDMETHOD.
+
+
+METHOD validate_prc_temp_id.
+  " CHANGING cs_pricing TYPE ztb_so_upload_pr
+
+  DATA: lv_msg    TYPE bapi_msg,
+        lv_suffix TYPE string,
+        lv_len    TYPE i.
+
+  " 1. Check Empty
+  IF cs_pricing-temp_id IS INITIAL.
+    lv_msg = 'Temp ID is required for Pricing Condition.'.
+    add_error( iv_temp_id   = cs_pricing-temp_id
+               iv_item_no   = cs_pricing-item_no
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_pricing-status = 'ERROR'.
+    RETURN.
+  ENDIF.
+
+  " 2. Check Prefix 'H'
+  IF cs_pricing-temp_id(1) <> 'H'.
+    lv_msg = |Invalid Pricing Temp ID '{ cs_pricing-temp_id }'. Must start with 'H'.|.
+    add_error( iv_temp_id   = cs_pricing-temp_id
+               iv_item_no   = cs_pricing-item_no
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_pricing-status = 'ERROR'.
+  ENDIF.
+
+  " 3. Check Length & Numeric Suffix
+  lv_len = strlen( cs_pricing-temp_id ).
+
+  IF lv_len < 2.
+    lv_msg = 'Temp ID is too short.'.
+    add_error( iv_temp_id   = cs_pricing-temp_id
+               iv_item_no   = cs_pricing-item_no
+               iv_fieldname = 'TEMP_ID'
+               iv_msg_type  = 'E'
+               iv_message   = lv_msg ).
+    cs_pricing-status = 'ERROR'.
+  ELSE.
+    lv_suffix = cs_pricing-temp_id+1.
+    IF lv_suffix CN '0123456789'.
+       lv_msg = |Invalid format '{ cs_pricing-temp_id }'. Suffix must be numeric.|.
+       add_error( iv_temp_id   = cs_pricing-temp_id
+                  iv_item_no   = cs_pricing-item_no
+                  iv_fieldname = 'TEMP_ID'
+                  iv_msg_type  = 'E'
+                  iv_message   = lv_msg ).
+       cs_pricing-status = 'ERROR'.
+    ENDIF.
+  ENDIF.
+
+ENDMETHOD.
 ENDCLASS.

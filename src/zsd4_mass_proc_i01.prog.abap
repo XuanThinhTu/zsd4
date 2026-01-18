@@ -158,11 +158,7 @@ MODULE reset_flag_on_change INPUT.
   ENDIF.
 ENDMODULE.
 
-*&---------------------------------------------------------------------*
-*&      Module  USER_COMMAND_0111  INPUT
-*&---------------------------------------------------------------------*
-*       text
-*----------------------------------------------------------------------*
+"chú ý 2
 MODULE user_command_0111 INPUT.
 
   DATA: lv_ok_code TYPE sy-ucomm.
@@ -171,36 +167,71 @@ MODULE user_command_0111 INPUT.
 
   CASE lv_ok_code.
       DATA: lv_action TYPE sy-ucomm.
+
+    " ---------------------------------------------------------------------
+    " 1. XỬ LÝ NHÓM NÚT THOÁT (BACK, EXIT, CANCEL)
+    " ---------------------------------------------------------------------
     WHEN 'BACK' OR 'EXIT' OR 'CANC'.
 
-      PERFORM perform_exit_confirmation
-        CHANGING
-          lv_action.
+      " [CASE A]: CHẾ ĐỘ EDIT (TỪ MASS UPLOAD)
+      IF gv_single_mode = 'EDIT'.
+         " Quay về màn hình gọi nó (Mass Upload - Screen 0200)
+         " LEAVE TO SCREEN 0 sẽ pop screen 0111 ra khỏi stack
+         LEAVE TO SCREEN 0.
 
-      CASE lv_action.
-        WHEN 'SAVE'.
-          " User chọn 'Yes' -> 'Save'
-          PERFORM perform_create_single_so .
-          IF gv_so_just_created = abap_true.
-            " <<< SỬA LỖI 2: Quay về Screen 0110 >>>
-            LEAVE TO SCREEN 0110.
-          ENDIF.
-          " (Nếu Save lỗi, user sẽ thấy lỗi và ở lại màn hình)
+      " [CASE B]: CHẾ ĐỘ CREATE (BÌNH THƯỜNG)
+      ELSE.
+         " Logic cũ: Hỏi xác nhận Save trước khi thoát
+         PERFORM perform_exit_confirmation CHANGING lv_action.
 
-        WHEN 'BACK'.
-          " User chọn 'No'
-          PERFORM reset_single_entry_screen .
-          " <<< SỬA LỖI 1: Quay về Screen 0110 >>>
-          LEAVE TO SCREEN 0110.
+         CASE lv_action.
+           WHEN 'SAVE'.
+             " User chọn 'Yes' -> Lưu mới
+             PERFORM perform_create_single_so.
+             IF gv_so_just_created = abap_true.
+               LEAVE TO SCREEN 0110.
+             ENDIF.
 
-        WHEN 'STAY'.
-          " User chọn 'Cancel' hoặc 'Edit'
-          " (Không làm gì cả, ở lại Screen 0111)
-      ENDCASE.
+           WHEN 'BACK'.
+             " User chọn 'No' -> Không lưu, Reset màn hình
+             PERFORM reset_single_entry_screen.
+             LEAVE TO SCREEN 0110.
 
+           WHEN 'STAY'.
+             " User chọn 'Cancel' -> Ở lại
+         ENDCASE.
+      ENDIF.
+
+    " ---------------------------------------------------------------------
+    " 2. XỬ LÝ NÚT SAVE
+    " ---------------------------------------------------------------------
     WHEN 'SAVE'.
-PERFORM perform_create_single_so.
 
+      " [CASE A]: CHẾ ĐỘ EDIT
+      IF gv_single_mode = 'EDIT'.
+         " Gọi Form Update (Dùng BAPI_SALESORDER_CHANGE)
+*         PERFORM perform_update_single_so.
+
+         " Nếu Update thành công (cờ gv_data_saved được bật trong Form update)
+         IF gv_data_saved = 'X'.
+            " Quay về Mass Upload để refresh lưới
+            LEAVE TO SCREEN 0.
+         ENDIF.
+         " Nếu lỗi -> Ở lại màn hình để User sửa tiếp
+
+      " [CASE B]: CHẾ ĐỘ CREATE
+      ELSE.
+         PERFORM perform_create_single_so.
+         " Logic chuyển màn hình sau khi tạo (nếu cần)
+         IF gv_so_just_created = abap_true.
+             " Tùy chọn: Muốn quay về hay ở lại xem
+             " LEAVE TO SCREEN 0110.
+         ENDIF.
+      ENDIF.
+
+    " ---------------------------------------------------------------------
+    " 3. CÁC NÚT KHÁC
+    " ---------------------------------------------------------------------
     WHEN 'TRCK'.
       CLEAR gv_so_just_created.
       LEAVE TO SCREEN 0500.
@@ -209,13 +240,16 @@ PERFORM perform_create_single_so.
 
 ENDMODULE.
 
-*&---------------------------------------------------------------------*
-*&      Module  USER_COMMAND_0200  INPUT
-*&---------------------------------------------------------------------*
-*       text
-*----------------------------------------------------------------------*
+"chú ý 2
 MODULE user_command_0200 INPUT.
-  DATA: lv_upload_mode TYPE c.
+
+  DATA: lv_upload_mode TYPE c,
+        lv_answer      TYPE c. " Biến cho Popup Confirm
+
+*  " Nên dùng biến tạm để tránh xung đột sy-ucomm
+*  DATA: lv_ucomm TYPE sy-ucomm.
+*  lv_ucomm = sy-ucomm.
+*  CLEAR sy-ucomm.
 
   CASE sy-ucomm.
     WHEN 'BACK' OR 'EXIT' OR 'CANC'.
@@ -223,11 +257,11 @@ MODULE user_command_0200 INPUT.
       LEAVE TO SCREEN 0.
 
     WHEN 'DWN_TMPL'.
-      PERFORM download_template .
+      PERFORM download_template.
 
-      " --- Nút UPLOAD (Duy nhất) ---
+      " --- Nút UPLOAD ---
     WHEN 'UPLOAD'.
-      " 1. Hiện Popup cho user chọn
+      " 1. Hiện Popup cho user chọn mode
       PERFORM popup_select_upload_mode CHANGING lv_upload_mode.
 
       " 2. Xử lý dựa trên lựa chọn
@@ -235,37 +269,66 @@ MODULE user_command_0200 INPUT.
         WHEN 'N'. " Upload New
           PERFORM generate_request_id CHANGING gv_current_req_id.
           PERFORM perform_mass_upload USING 'NEW' gv_current_req_id.
-*          PERFORM validate_staging_data USING gv_current_req_id.
-*          PERFORM load_data_from_staging USING gv_current_req_id.
-*          gv_data_loaded = abap_true.
 
-        WHEN 'R'. " Resubmit
+          " [UNCOMMENT]: Upload xong phải Validate và Load ngay để user thấy
+          PERFORM validate_staging_data USING gv_current_req_id.
+          PERFORM load_data_from_staging USING gv_current_req_id.
+          gv_data_loaded = abap_true.
+
+        WHEN 'R'. " Resubmit (Sửa lỗi file cũ)
           PERFORM perform_mass_upload USING 'RESUBMIT' gv_current_req_id.
           PERFORM validate_staging_data USING gv_current_req_id.
           PERFORM load_data_from_staging USING gv_current_req_id.
           gv_data_loaded = abap_true.
 
-        WHEN 'C'. " Resume (Your Record)
-          " (Logic Resume: Load từ DB)
+        WHEN 'C'. " Resume (Tiếp tục việc dở dang)
           PERFORM load_staging_from_db USING sy-uname.
-          " (FORM này sẽ tự gán gv_current_req_id)
-          " 2. Nếu tìm thấy (gv_current_req_id có dữ liệu), load chi tiết lên ALV
+
           IF gv_current_req_id IS NOT INITIAL.
             PERFORM load_data_from_staging USING gv_current_req_id.
             gv_data_loaded = abap_true.
+          ELSE.
+            MESSAGE 'No unfinished session found.' TYPE 'S'.
           ENDIF.
 
         WHEN OTHERS.
-          " User bấm Cancel popup -> Không làm gì cả
+          " User bấm Cancel popup -> Không làm gì
       ENDCASE.
 
-    WHEN 'VALI'.
+    WHEN 'VALI'. " Re-validate (Nút thủ công)
       PERFORM revalidate_data.
 
-    WHEN 'SAVE'.
-      " (Logic lưu Staging mà không validate)
+    WHEN 'SAVE'. " Save Draft
+      PERFORM perform_save_data.
 
+      " --- NÚT CLEAR (Đã mở lại code) ---
+    WHEN 'CLEA'.
+
+      " --- NÚT CREATE SALES ORDER (Logic chuẩn 5 bước) ---
     WHEN 'CREA_SO'.
+      " BƯỚC 1: Ép dữ liệu từ màn hình ALV vào bảng nội bộ (Auto-Enter)
+      " (Phải check IS BOUND để tránh dump nếu tab chưa từng được click vào)
+      IF go_grid_hdr_val IS BOUND. go_grid_hdr_val->check_changed_data( ). ENDIF.
+      IF go_grid_itm_val IS BOUND. go_grid_itm_val->check_changed_data( ). ENDIF.
+      IF go_grid_cnd_val IS BOUND. go_grid_cnd_val->check_changed_data( ). ENDIF.
+
+      IF go_grid_hdr_fail IS BOUND. go_grid_hdr_fail->check_changed_data( ). ENDIF.
+      IF go_grid_itm_fail IS BOUND. go_grid_itm_fail->check_changed_data( ). ENDIF.
+      IF go_grid_cnd_fail IS BOUND. go_grid_cnd_fail->check_changed_data( ). ENDIF.
+
+      " BƯỚC 2: Lưu xuống Database (Auto-Save & Sync)
+      PERFORM sync_alv_to_staging_tables.
+
+      " BƯỚC 3: Validate lại toàn bộ (Auto-Validate)
+      " Để bắt các lỗi mới phát sinh do user sửa bậy trước khi tạo đơn
+      PERFORM validate_staging_data USING gv_current_req_id.
+
+      " BƯỚC 4: Load lại Status mới nhất
+      " Nếu Validate ra lỗi -> Status chuyển thành ERROR -> Bị loại khỏi bước 5
+      PERFORM load_data_from_staging USING gv_current_req_id.
+
+      " BƯỚC 5: Tiến hành tạo SO
+      " (Chỉ xử lý dòng READY hoặc INCOMP, dòng ERROR sẽ bị bỏ qua)
       PERFORM perform_create_sales_orders.
 
   ENDCASE.
@@ -312,160 +375,6 @@ MODULE f4_for_filepath INPUT.
 ENDMODULE.
 
 *&---------------------------------------------------------------------*
-*&      Module  USER_COMMAND_0500  INPUT
-*&---------------------------------------------------------------------*
-*MODULE user_command_0500 INPUT.
-*
-*  "=========================================================
-*  "===  1. XỬ LÝ SỰ KIỆN ALV & ĐỒNG BỘ HÓA
-*  "=========================================================
-*  " (Lấy từ Module Pool gốc)
-*  " Phải gọi dispatch() TRƯỚC CASE SY-UCOMM để bắt sự kiện ALV (vd: hotspot)
-*  cl_gui_cfw=>dispatch( ).
-*
-*  " (Lấy từ Program gốc, nhưng ĐỔI TÊN BIẾN)
-*  " Phải gọi check_changed_data() TRƯỚC khi get_selected_rows
-*  IF go_alv1 IS BOUND.  " <<< THAY ĐỔI: Dùng go_alv1
-*    CALL METHOD go_alv1->check_changed_data. " <<< THAY ĐỔI: Dùng go_alv1
-*  ENDIF.
-*  "=========================================================
-*
-*  CASE sy-ucomm.
-*
-*      "=========================================================
-*      " 🔍 1️⃣ LỌC CHÍNH (VÀ CẬP NHẬT MÀN HÌNH)
-*      "=========================================================
-*    WHEN 'SEARCH' OR 'UPD_STAT'.
-*      IF cb_sosta = 'INC'.
-*        CLEAR: cb_ddsta, cb_bdsta.
-*      ENDIF.
-*      PERFORM load_tracking_data.
-*      PERFORM apply_phase_logic.
-*      PERFORM filter_process_phase.
-*      PERFORM filter_tracking_data.
-*      PERFORM filter_delivery_status.
-*      PERFORM filter_billing_status.
-*      IF cb_sosta <> 'INC'.
-*        PERFORM filter_pricing_procedure.
-*      ENDIF.
-*
-*      " Refresh ALV
-*      IF go_alv1 IS BOUND.  " <<< THAY ĐỔI: Dùng go_alv1
-*        CALL METHOD go_alv1->refresh_table_display( ). " <<< THAY ĐỔI: Dùng go_alv1
-*      ENDIF.
-*
-*
-*      "=========================================================
-*      " ⚙️ 2️⃣ CÁC NÚT ACTIONS
-*      "=========================================================
-*      " HỢP NHẤT: Bao gồm UCOMM từ cả 2 file để đảm bảo bắt đúng
-*    WHEN 'POST_PGI' OR 'REVERSE_PGI' OR 'REVERSE_GI'
-*      OR 'CANCEL_BILL' OR 'CREATE_BILL' OR 'CREATE_BILLING'.
-*
-*      " --- Bắt đầu code logic actions từ program gốc ---
-*      DATA: lt_selected_rows TYPE lvc_t_row,
-*            ls_selected_row  TYPE lvc_s_row.
-**            lv_count         TYPE i.
-*      FIELD-SYMBOLS: <fs_tracking> TYPE ty_tracking.
-*
-*      DATA: lv_last_msg     TYPE string.
-*      DATA: lv_last_msg_typ TYPE c.
-*
-*      lv_count = 0.
-*
-*      " 1. LẤY DANH SÁCH DÒNG ĐÃ CHỌN (BẰNG CHECKBOX)
-*      " Phải check BOUND trước khi gọi
-*      IF go_alv1 IS NOT BOUND. " <<< THAY ĐỔI: Dùng go_alv1
-*        MESSAGE 'Lỗi: ALV object GO_ALV1 chưa được tạo.' TYPE 'E'.
-*        EXIT. " Thoát khỏi PAI
-*      ENDIF.
-*
-*      " <<< THAY ĐỔI: Dùng go_alv1
-*      CALL METHOD go_alv1->get_selected_rows
-*        IMPORTING
-*          et_index_rows = lt_selected_rows.
-*
-*      " 2. LẶP QUA CÁC DÒNG ĐÃ TICK
-*      LOOP AT lt_selected_rows INTO ls_selected_row.
-*        READ TABLE gt_tracking ASSIGNING <fs_tracking>
-*                           INDEX ls_selected_row-index.
-*        IF sy-subrc <> 0. CONTINUE. ENDIF.
-*
-*        lv_count = lv_count + 1.
-*
-*        " 3. THỰC THI ACTION
-*        CASE sy-ucomm.
-*          WHEN 'POST_PGI'.
-*            PERFORM process_post_goods_issue
-*              USING <fs_tracking> CHANGING <fs_tracking>.
-*
-*            " HỢP NHẤT: Cả hai UCOMM cùng chạy 1 logic
-*          WHEN 'CREATE_BILL' OR 'CREATE_BILLING'.
-*            PERFORM process_create_billing
-*              USING <fs_tracking> CHANGING <fs_tracking>.
-*
-*            " HỢP NHẤT: Cả hai UCOMM cùng chạy 1 logic
-*          WHEN 'REVERSE_PGI' OR 'REVERSE_GI'.
-*            PERFORM process_reverse_pgi
-*              USING <fs_tracking> CHANGING <fs_tracking>.
-*
-*          WHEN 'CANCEL_BILL'.
-*            PERFORM process_cancel_billing
-*              USING <fs_tracking> CHANGING <fs_tracking>.
-*        ENDCASE.
-*
-*        " 4. THU HOẠCH KẾT QUẢ (lưu message cuối)
-*        lv_last_msg = <fs_tracking>-error_msg.
-*        IF <fs_tracking>-error_msg CS 'LỖI' OR
-*           <fs_tracking>-error_msg CS 'ERROR' OR
-*           <fs_tracking>-error_msg CS 'thất bại'.
-*          lv_last_msg_typ = 'E'.
-*        ELSE.
-*          lv_last_msg_typ = 'S'.
-*        ENDIF.
-*
-*      ENDLOOP.
-*
-*      " 5. KIỂM TRA VÀ HIỂN THỊ KẾT QUẢ
-*      IF lv_count > 0.
-*        MESSAGE '' TYPE 'S'. " Xóa message cũ
-*
-*        IF lv_count = 1.
-*          IF lv_last_msg_typ = 'S'.
-*            MESSAGE lv_last_msg TYPE 'S'.
-*          ELSE.
-*            MESSAGE lv_last_msg TYPE 'S' DISPLAY LIKE 'E'.
-*          ENDIF.
-*        ELSE.
-*          MESSAGE |Đã xử lý { lv_count } dòng.| TYPE 'S'.
-*        ENDIF.
-*
-*        PERFORM apply_phase_logic.
-*
-*        " Refresh (đã check BOUND ở trên)
-*        " <<< THAY ĐỔI: Dùng go_alv1
-*        CALL METHOD go_alv1->refresh_table_display( ).
-*
-*      ELSE.
-*        MESSAGE 'Bạn vui lòng tick ít nhất một dòng (checkbox) để xử lý.' TYPE 'S' DISPLAY LIKE 'E'.
-*        " <<< THAY ĐỔI: XÓA 'LEAVE LIST-PROCESSING'
-*        " Lệnh này không dùng trong Module Pool
-*      ENDIF.
-*      " --- Kết thúc code logic actions từ program gốc ---
-*
-*
-*      "=========================================================
-*      " 🚪 3️⃣ THOÁT (Sử dụng logic của Module Pool)
-*      "=========================================================
-*    WHEN 'BACK' OR 'EXIT' OR 'CANC'.
-*      " <<< THAY ĐỔI: Dùng LEAVE TO SCREEN 0
-*      " Lệnh này sẽ quay về màn hình trước đó (thường là menu chính)
-*      " KHÔNG DÙNG 'LEAVE PROGRAM' (vì sẽ thoát toàn bộ T-Code)
-*      LEAVE TO SCREEN 0.
-*  ENDCASE.
-*
-*ENDMODULE.
-*&---------------------------------------------------------------------*
 *& Module USER_COMMAND_0500 INPUT
 *&---------------------------------------------------------------------*
 *&---------------------------------------------------------------------*
@@ -473,160 +382,171 @@ ENDMODULE.
 *&---------------------------------------------------------------------*
 MODULE user_command_0500 INPUT.
 
-  " =========================================================
-  " 1. KHAI BÁO BIẾN (GỘP CHUNG Ở ĐẦU ĐỂ TRÁNH LỖI TRÙNG LẶP)
-  " =========================================================
-  DATA: lt_selected_rows TYPE lvc_t_row,
-        ls_selected_row  TYPE lvc_s_row,
-*        lv_count         TYPE i,
-        lv_last_msg      TYPE string,
-        lv_last_msg_typ  TYPE c.
-  FIELD-SYMBOLS: <fs_tracking> TYPE ty_tracking.
+  " 1. ĐỒNG BỘ DỮ LIỆU TỪ MÀN HÌNH VÀO BẢNG NỘI BỘ
 
-  " =========================================================
-  " 2. ĐỒNG BỘ DỮ LIỆU TỪ ALV XUỐNG CHƯƠNG TRÌNH
-  " =========================================================
-  cl_gui_cfw=>dispatch( ).
-
-  IF go_alv1 IS BOUND.
-    CALL METHOD go_alv1->check_changed_data.
+  IF go_alv IS BOUND.
+    CALL METHOD go_alv->check_changed_data.
   ENDIF.
 
-  " =========================================================
-  " 3. XỬ LÝ SỰ KIỆN NGƯỜI DÙNG
-  " =========================================================
   CASE sy-ucomm.
 
-    " -------------------------------------------------------
-    " 🔍 NHÓM 1: TÌM KIẾM & LÀM MỚI
-    " -------------------------------------------------------
+    "=========================================================
+    "   NHÓM TÌM KIẾM & LỌC (SEARCH / FILTER)
+    "=========================================================
     WHEN 'SEARCH' OR 'UPD_STAT'.
+      " Nếu chọn filter Incomplete thì reset các filter status khác
       IF cb_sosta = 'INC'.
         CLEAR: cb_ddsta, cb_bdsta.
       ENDIF.
 
-      " Quy trình nạp lại dữ liệu chuẩn:
-      PERFORM load_tracking_data.       " Đọc DB
-      PERFORM apply_phase_logic.        " Tính toán Phase/Icon
-      PERFORM filter_process_phase.     " Lọc Phase
-      PERFORM filter_tracking_data.     " Lọc Status SO
-      PERFORM filter_delivery_status.   " Lọc Delivery
-      PERFORM filter_billing_status.    " Lọc Billing
+      " Gọi lại các form lấy dữ liệu và áp dụng bộ lọc
+      PERFORM load_tracking_data.
+      PERFORM apply_phase_logic.
+      PERFORM filter_process_phase.
+      PERFORM filter_tracking_data.
+      PERFORM filter_delivery_status.
+      PERFORM filter_billing_status.
+
+      " Pricing Procedure chỉ lọc khi không phải là Incomplete
       IF cb_sosta <> 'INC'.
         PERFORM filter_pricing_procedure.
       ENDIF.
 
-      " Vẽ lại ALV
-      IF go_alv1 IS BOUND.
-        CALL METHOD go_alv1->refresh_table_display( ).
+
+      IF go_alv IS BOUND.
+        CALL METHOD go_alv->refresh_table_display( ).
       ENDIF.
 
-    " -------------------------------------------------------
-    " 📅 NHÓM 2: QUẢN LÝ JOB BACKGROUND
-    " -------------------------------------------------------
+    "=========================================================
+    "   NHÓM JOB (SCHEDULE / MONITOR)
+    "=========================================================
     WHEN 'SET_JOB'.
       PERFORM setup_job_schedule.
 
     WHEN 'JOB_MON'.
       PERFORM show_job_monitor_popup.
 
-    " -------------------------------------------------------
-    " ⚙️ NHÓM 3: CÁC NÚT THAO TÁC NGHIỆP VỤ (QUAN TRỌNG)
-    " -------------------------------------------------------
-    WHEN 'POST_PGI' OR 'REVERSE_PGI' OR 'REVERSE_GI'
-      OR 'CANCEL_BILL' OR 'CREATE_BILL' OR 'CREATE_BILLING'
-      OR 'REL_ACC'.
+    "=========================================================
+    "   NHÓM ACTION BUTTONS (XỬ LÝ HÀNG LOẠT - MASS ACTION)
+    "=========================================================
+    WHEN 'POST_PGI' OR 'REVERSE_PGI' OR 'CANCEL_BILL' OR 'CREATE_BILL' OR 'REL_ACC'.
+
+      DATA:
+            lv_last_msg     TYPE string,
+*            lv_count        TYPE i,
+            lv_last_msg_typ TYPE c.
+
+      " Biến để lấy danh sách dòng được bôi đen (Highlight)
+      DATA: lt_rows TYPE lvc_t_row,
+            ls_row  TYPE lvc_s_row.
+
+      FIELD-SYMBOLS: <fs_tracking> TYPE ty_tracking.
 
       lv_count = 0.
 
-      " A. Lấy danh sách các dòng được chọn
-      IF go_alv1 IS BOUND.
-        CALL METHOD go_alv1->get_selected_rows
+      "-------------------------------------------------------
+      " BIẾN 'DÒNG BÔI ĐEN' THÀNH 'CHECKBOX'
+      "-------------------------------------------------------
+      " Lấy danh sách index các dòng đang được bôi xanh (Selected Rows)
+      IF go_alv IS BOUND.
+        CALL METHOD go_alv->get_selected_rows
           IMPORTING
-            et_index_rows = lt_selected_rows.
+            et_index_rows = lt_rows.
       ENDIF.
 
-      " B. Lặp qua từng dòng để xử lý
-      LOOP AT lt_selected_rows INTO ls_selected_row.
-        READ TABLE gt_tracking ASSIGNING <fs_tracking>
-                               INDEX ls_selected_row-index.
-        IF sy-subrc <> 0. CONTINUE. ENDIF.
+      " Nếu có dòng bôi đen, ta tự động đánh dấu 'X' vào cột SEL_BOX
+      IF lt_rows IS NOT INITIAL.
+        LOOP AT lt_rows INTO ls_row.
+          READ TABLE gt_tracking ASSIGNING <fs_tracking> INDEX ls_row-index.
+          IF sy-subrc = 0.
+            <fs_tracking>-sel_box = 'X'.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+
+      "-------------------------------------------------------
+      "  CHẠY VÒNG LẶP XỬ LÝ (Dựa trên SEL_BOX = 'X')
+      "-------------------------------------------------------
+      LOOP AT gt_tracking ASSIGNING <fs_tracking> WHERE sel_box = 'X'.
 
         lv_count = lv_count + 1.
 
-        " C. Gọi FORM xử lý tương ứng
+        " Gọi Form xử lý tương ứng với nút bấm
         CASE sy-ucomm.
           WHEN 'POST_PGI'.
-            PERFORM process_post_goods_issue
-              USING <fs_tracking> CHANGING <fs_tracking>.
-
-          WHEN 'CREATE_BILL' OR 'CREATE_BILLING'.
-            PERFORM process_create_billing
-              USING <fs_tracking> CHANGING <fs_tracking>.
-
-          WHEN 'REVERSE_PGI' OR 'REVERSE_GI'.
-            PERFORM process_reverse_pgi
-              USING <fs_tracking> CHANGING <fs_tracking>.
-
+            PERFORM process_post_goods_issue    USING <fs_tracking> CHANGING <fs_tracking>.
+          WHEN 'CREATE_BILL'.
+            PERFORM process_create_billing      USING <fs_tracking> CHANGING <fs_tracking>.
+          WHEN 'REVERSE_PGI'.
+            PERFORM process_reverse_pgi         USING <fs_tracking> CHANGING <fs_tracking>.
           WHEN 'CANCEL_BILL'.
-            PERFORM process_cancel_billing
-              USING <fs_tracking> CHANGING <fs_tracking>.
-
+            PERFORM process_cancel_billing      USING <fs_tracking> CHANGING <fs_tracking>.
           WHEN 'REL_ACC'.
-            PERFORM process_release_to_account
-              USING <fs_tracking> CHANGING <fs_tracking>.
+            PERFORM process_release_to_account  USING <fs_tracking> CHANGING <fs_tracking>.
         ENDCASE.
 
-        " D. Lưu lại thông báo lỗi cuối cùng để hiển thị
+        " Lưu lại thông báo lỗi/thành công cuối cùng để hiển thị ra màn hình
         lv_last_msg = <fs_tracking>-error_msg.
-        IF <fs_tracking>-error_msg CS 'LỖI' OR
-           <fs_tracking>-error_msg CS 'ERROR' OR
-           <fs_tracking>-error_msg CS 'thất bại' OR
-           <fs_tracking>-error_msg CS 'Failed'.
-          lv_last_msg_typ = 'E'.
+
+        " Kiểm tra xem thông báo là Lỗi hay Thành công
+        IF <fs_tracking>-error_msg CS 'ERROR' OR
+           <fs_tracking>-error_msg CS 'failed' OR
+           <fs_tracking>-error_msg CS 'LỖI'.
+           lv_last_msg_typ = 'E'. " Error
         ELSE.
-          lv_last_msg_typ = 'S'.
+           lv_last_msg_typ = 'S'. " Success
         ENDIF.
+
       ENDLOOP.
 
-      " E. Hiển thị kết quả & Làm mới màn hình
+      "-------------------------------------------------------
+      "  KẾT THÚC & HIỂN THỊ KẾT QUẢ
+      "-------------------------------------------------------
       IF lv_count > 0.
-        MESSAGE '' TYPE 'S'. " Xóa thông báo cũ trên thanh status
 
-        " Hiển thị thông báo kết quả
+        " 3a. Hiển thị thông báo
         IF lv_count = 1.
-          IF lv_last_msg_typ = 'S'.
-            MESSAGE lv_last_msg TYPE 'S'.
-          ELSE.
-            MESSAGE lv_last_msg TYPE 'S' DISPLAY LIKE 'E'.
-          ENDIF.
+          " Nếu chỉ chọn 1 dòng: Hiện chi tiết nội dung thông báo
+          MESSAGE lv_last_msg TYPE 'S' DISPLAY LIKE lv_last_msg_typ.
         ELSE.
-          MESSAGE |Đã xử lý { lv_count } dòng.| TYPE 'S'.
+          " Nếu chọn nhiều dòng: Báo tổng số lượng đã xử lý
+          MESSAGE |Mass Processing: Completed { lv_count } rows. Please check Status column.| TYPE 'S'.
         ENDIF.
 
-        " [QUAN TRỌNG] Nạp lại dữ liệu để cập nhật trạng thái mới (số hóa đơn, PGI...)
+        " 3b. Commit dữ liệu xuống Database (QUAN TRỌNG)
+        COMMIT WORK AND WAIT.
+        WAIT UP TO 1 SECONDS.
+
+        " 3c. Load lại dữ liệu mới nhất từ DB
         PERFORM load_tracking_data.
         PERFORM apply_phase_logic.
         PERFORM filter_process_phase.
         PERFORM filter_tracking_data.
         PERFORM filter_delivery_status.
         PERFORM filter_billing_status.
+
         IF cb_sosta <> 'INC'.
           PERFORM filter_pricing_procedure.
         ENDIF.
 
-        " Refresh Grid
-        IF go_alv1 IS BOUND.
-          CALL METHOD go_alv1->refresh_table_display( ).
+        " 3d. Refresh màn hình ALV (Giữ nguyên vị trí thanh cuộn)
+        IF go_alv IS BOUND.
+          DATA: ls_stable TYPE lvc_s_stbl.
+          ls_stable-row = 'X'. " Giữ vị trí dòng
+          ls_stable-col = 'X'. " Giữ vị trí cột
+          CALL METHOD go_alv->refresh_table_display
+            EXPORTING
+              is_stable = ls_stable.
         ENDIF.
 
       ELSE.
-        MESSAGE 'Bạn vui lòng tick ít nhất một dòng (checkbox) để xử lý.' TYPE 'S' DISPLAY LIKE 'E'.
+        " Trường hợp bấm nút mà không chọn dòng nào (cả checkbox lẫn bôi đen)
+        MESSAGE 'Please select at least one row (Highlight or Checkbox) to process.' TYPE 'S' DISPLAY LIKE 'E'.
       ENDIF.
 
-    " -------------------------------------------------------
-    " 🚪 NHÓM 4: THOÁT
-    " -------------------------------------------------------
+    "=========================================================
+    "  🚪 4. THOÁT CHƯƠNG TRÌNH
+    "=========================================================
     WHEN 'BACK' OR 'EXIT' OR 'CANC'.
       LEAVE TO SCREEN 0.
 
@@ -672,42 +592,6 @@ MODULE f4_for_ernam.
     EXCEPTIONS
       OTHERS      = 1.
 ENDMODULE.
-
-*MODULE f4_for_vkorg.
-*  CALL FUNCTION 'F4IF_FIELD_VALUE_REQUEST'
-*    EXPORTING
-*      tabname     = 'VBAK'
-*      fieldname   = 'VKORG'
-*      dynpprog    = sy-repid
-*      dynpnr      = sy-dynnr
-*      dynprofield = 'GV_VKORG'
-*    EXCEPTIONS
-*      OTHERS      = 1.
-*ENDMODULE.
-*
-*MODULE f4_for_vtweg.
-*  CALL FUNCTION 'F4IF_FIELD_VALUE_REQUEST'
-*    EXPORTING
-*      tabname     = 'VBAK'
-*      fieldname   = 'VTWEG'
-*      dynpprog    = sy-repid
-*      dynpnr      = sy-dynnr
-*      dynprofield = 'GV_VTWEG'
-*    EXCEPTIONS
-*      OTHERS      = 1.
-*ENDMODULE.
-*
-*MODULE f4_for_spart.
-*  CALL FUNCTION 'F4IF_FIELD_VALUE_REQUEST'
-*    EXPORTING
-*      tabname     = 'VBAK'
-*      fieldname   = 'SPART'
-*      dynpprog    = sy-repid
-*      dynpnr      = sy-dynnr
-*      dynprofield = 'GV_SPART'
-*    EXCEPTIONS
-*      OTHERS      = 1.
-*ENDMODULE.
 
 MODULE f4_for_doc_date.
   CALL FUNCTION 'F4IF_FIELD_VALUE_REQUEST'
@@ -963,8 +847,8 @@ MODULE user_command_0102 INPUT.
           CALL SCREEN 0110.
         WHEN '2'. " Mass Upload Orders
           CALL SCREEN 0211. " (Screen test của bạn)
-        WHEN '3'. " Search & Process
-          MESSAGE 'Chức năng đang phát triển (Search & Process SO).' TYPE 'S'.
+*        WHEN '3'. " Search & Process
+*          MESSAGE 'Chức năng đang phát triển (Search & Process SO).' TYPE 'S'.
       ENDCASE.
 
       " --- 2. MANAGE DELIVERY ---
@@ -990,8 +874,13 @@ MODULE user_command_0102 INPUT.
         WHEN '2'. " Report Monitoring
           CALL SCREEN 0800.
         WHEN '3'. " Change Log
+          "CALL SCREEN 0900.
           MESSAGE 'Chức năng đang phát triển (Change Log).' TYPE 'S'.
       ENDCASE.
+
+    WHEN 'REFRESH'.
+      " --- [NEW] GỌI FORM REFRESH ---
+      PERFORM hc_refresh_dashboard.
 
       " --- THOÁT ---
     WHEN 'BACK' OR 'EXIT' OR 'CANCEL'.
@@ -1046,19 +935,41 @@ ENDMODULE.
 MODULE user_command_0800 INPUT.
   CASE sy-ucomm.
     WHEN 'BACK' OR 'EXIT' OR 'CANCEL'.
-      " Giải phóng bộ nhớ (Optional nhưng tốt)
-      IF go_html_kpi_sd4 IS BOUND. go_html_kpi_sd4->free( ). ENDIF.
-      IF go_html_cht_sd4 IS BOUND. go_html_cht_sd4->free( ). ENDIF.
-      IF go_alv_sd4      IS BOUND. go_alv_sd4->free( ). ENDIF.
-      IF go_cc_report    IS BOUND. go_cc_report->free( ). ENDIF.
+      " Giải phóng bộ nhớ (Chỉ giải phóng những object còn tồn tại)
+      " 1. Free các Control con trước (ALV, HTML Viewer)
+      IF go_html_kpi_sd4 IS BOUND.
+        go_html_kpi_sd4->free( ).
+        CLEAR go_html_kpi_sd4. " <--- Thêm dòng này
+      ENDIF.
+
+      IF go_alv_sd4 IS BOUND.
+        go_alv_sd4->free( ).
+        CLEAR go_alv_sd4.      " <--- Thêm dòng này
+      ENDIF.
+
+      " 2. Free các Container bố cục (Splitter)
+      IF go_split_sd4 IS BOUND.
+        go_split_sd4->free( ).
+        CLEAR go_split_sd4.    " <--- Thêm dòng này
+      ENDIF.
+
+      " 3. Free Container chính
+      IF go_cc_report IS BOUND.
+        go_cc_report->free( ).
+        CLEAR go_cc_report.    " <--- Thêm dòng này
+      ENDIF.
+
+      " 4. Clear các biến tham chiếu container con (để chắc chắn PBO chạy lại)
+      CLEAR: go_c_top_sd4, go_c_bot_sd4.
+
       LEAVE TO SCREEN 0.
 
     WHEN 'SEARCH'.
       CLEAR gv_exec_srch_sd4.
-      " Gọi Popup 0802 (Popup này chứa Subscreen 0801)
+      " Gọi Popup 0802 (Chứa Subscreen 0801)
       CALL SCREEN 0802 STARTING AT 10 5 ENDING AT 105 25.
 
-      " Xử lý sau khi đóng Popup
+      " Xử lý sau khi đóng Popup (Nếu user bấm Execute)
       IF gv_exec_srch_sd4 = 'X'.
         PERFORM get_filtered_data_sd4.
         PERFORM update_dashboard_ui_sd4.
@@ -1067,6 +978,12 @@ MODULE user_command_0800 INPUT.
     WHEN 'REFRESH'.
       PERFORM get_initial_data_sd4.
       PERFORM update_dashboard_ui_sd4.
+
+    WHEN 'DASHBOARD'.
+      " Chuyển sang màn hình chi tiết 0900
+      CALL SCREEN 0900.
+      " (Nếu Screen 0900 là Popup thì thêm STARTING AT...)
+
   ENDCASE.
 ENDMODULE.
 *&---------------------------------------------------------------------*
@@ -1083,4 +1000,46 @@ CASE sy-ucomm.
       CLEAR gv_exec_srch_sd4.
       LEAVE TO SCREEN 0.
   ENDCASE.
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0900  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0900 INPUT.
+  CASE sy-ucomm.
+    WHEN 'BACK' OR 'EXIT' OR 'CANCEL'.
+      LEAVE TO SCREEN 0.
+    WHEN 'REFRESH'.
+      PERFORM refresh_data_0900 USING 'ALL'.
+  ENDCASE.
+ENDMODULE.
+MODULE pai_sync_alv_data INPUT.
+  " 1. Ép ALV Item lưu dữ liệu (nếu đang hiện)
+  IF go_grid_item_single IS BOUND.
+    go_grid_item_single->check_changed_data( ).
+  ENDIF.
+
+  " 2. Ép ALV Condition lưu dữ liệu (nếu đang hiện)
+  IF go_grid_conditions IS BOUND.
+    go_grid_conditions->check_changed_data( ).
+  ENDIF.
+
+  " 3. Logic Đồng bộ ngược từ Condition về Item (Để giữ giá khi chuyển tab)
+  " (Logic này tui đã đưa ở câu trả lời trước, đặt vào đây là hợp lý nhất)
+  IF gt_conditions_alv IS NOT INITIAL AND gv_current_item_idx > 0.
+    FIELD-SYMBOLS: <fs_cond> TYPE ty_cond_alv,
+                   <fs_item> TYPE ty_item_details.
+
+    READ TABLE gt_item_details ASSIGNING <fs_item> INDEX gv_current_item_idx.
+    IF sy-subrc = 0.
+      LOOP AT gt_conditions_alv ASSIGNING <fs_cond> WHERE amount IS NOT INITIAL.
+        <fs_item>-cond_type  = <fs_cond>-kschl.
+        <fs_item>-unit_price = <fs_cond>-amount.
+        <fs_item>-currency   = <fs_cond>-waers.
+        EXIT. " Chỉ lấy dòng đầu tiên có giá
+      ENDLOOP.
+    ENDIF.
+  ENDIF.
 ENDMODULE.

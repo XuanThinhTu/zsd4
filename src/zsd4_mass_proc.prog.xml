@@ -603,7 +603,7 @@
       <TYPE>N</TYPE>
       <NEXTSCREEN>0111</NEXTSCREEN>
       <LINES>033</LINES>
-      <COLUMNS>149</COLUMNS>
+      <COLUMNS>167</COLUMNS>
      </HEADER>
      <CONTAINERS>
       <RPY_DYCATT>
@@ -812,8 +812,8 @@
        <TEXT>Sales_Data__________________________________________________________________________________________________________________________</TEXT>
        <LINE>004</LINE>
        <COLUMN>001</COLUMN>
-       <LENGTH>147</LENGTH>
-       <VISLENGTH>147</VISLENGTH>
+       <LENGTH>148</LENGTH>
+       <VISLENGTH>148</VISLENGTH>
        <HEIGHT>003</HEIGHT>
        <FORMAT>CHAR</FORMAT>
        <REQU_ENTRY>N</REQU_ENTRY>
@@ -4028,7 +4028,7 @@
       <TYPE>N</TYPE>
       <NEXTSCREEN>0500</NEXTSCREEN>
       <LINES>033</LINES>
-      <COLUMNS>209</COLUMNS>
+      <COLUMNS>211</COLUMNS>
      </HEADER>
      <CONTAINERS>
       <RPY_DYCATT>
@@ -4041,8 +4041,8 @@
        <ELEMENT_OF>SCREEN</ELEMENT_OF>
        <LINE>011</LINE>
        <COLUMN>001</COLUMN>
-       <LENGTH>165</LENGTH>
-       <HEIGHT>016</HEIGHT>
+       <LENGTH>211</LENGTH>
+       <HEIGHT>023</HEIGHT>
       </RPY_DYCATT>
      </CONTAINERS>
      <FIELDS>
@@ -4068,8 +4068,8 @@
        <TEXT>____________________________________________________________________________________________________________________________________</TEXT>
        <LINE>002</LINE>
        <COLUMN>001</COLUMN>
-       <LENGTH>166</LENGTH>
-       <VISLENGTH>166</VISLENGTH>
+       <LENGTH>169</LENGTH>
+       <VISLENGTH>169</VISLENGTH>
        <HEIGHT>003</HEIGHT>
        <FORMAT>CHAR</FORMAT>
        <REQU_ENTRY>N</REQU_ENTRY>
@@ -4093,11 +4093,11 @@
        <CONT_NAME>SCREEN</CONT_NAME>
        <TYPE>TEMPLATE</TYPE>
        <NAME>GV_DOC_DATE</NAME>
-       <TEXT>________</TEXT>
+       <TEXT>___________</TEXT>
        <LINE>003</LINE>
        <COLUMN>016</COLUMN>
-       <LENGTH>008</LENGTH>
-       <VISLENGTH>008</VISLENGTH>
+       <LENGTH>011</LENGTH>
+       <VISLENGTH>011</VISLENGTH>
        <HEIGHT>001</HEIGHT>
        <FORMAT>DATS</FORMAT>
        <INPUT_FLD>X</INPUT_FLD>
@@ -4110,7 +4110,7 @@
        <NAME>SALEDOC</NAME>
        <TEXT>Sale_Docs</TEXT>
        <LINE>003</LINE>
-       <COLUMN>025</COLUMN>
+       <COLUMN>028</COLUMN>
        <LENGTH>009</LENGTH>
        <VISLENGTH>009</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4124,7 +4124,7 @@
        <NAME>GV_VBELN</NAME>
        <TEXT>__________</TEXT>
        <LINE>003</LINE>
-       <COLUMN>035</COLUMN>
+       <COLUMN>038</COLUMN>
        <LENGTH>010</LENGTH>
        <VISLENGTH>010</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4139,7 +4139,7 @@
        <NAME>DEDOCS</NAME>
        <TEXT>Delivery_Docs:</TEXT>
        <LINE>003</LINE>
-       <COLUMN>046</COLUMN>
+       <COLUMN>049</COLUMN>
        <LENGTH>014</LENGTH>
        <VISLENGTH>014</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4153,7 +4153,7 @@
        <NAME>GV_DELIV</NAME>
        <TEXT>__________</TEXT>
        <LINE>003</LINE>
-       <COLUMN>061</COLUMN>
+       <COLUMN>064</COLUMN>
        <LENGTH>010</LENGTH>
        <VISLENGTH>010</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4168,7 +4168,7 @@
        <NAME>BILLINGDOCS</NAME>
        <TEXT>BillDocs:</TEXT>
        <LINE>003</LINE>
-       <COLUMN>072</COLUMN>
+       <COLUMN>075</COLUMN>
        <LENGTH>009</LENGTH>
        <VISLENGTH>009</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4182,7 +4182,7 @@
        <NAME>GV_BILL</NAME>
        <TEXT>_____________</TEXT>
        <LINE>003</LINE>
-       <COLUMN>082</COLUMN>
+       <COLUMN>085</COLUMN>
        <LENGTH>013</LENGTH>
        <VISLENGTH>013</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4197,7 +4197,7 @@
        <NAME>SOLD</NAME>
        <TEXT>Sold-to_Party</TEXT>
        <LINE>003</LINE>
-       <COLUMN>096</COLUMN>
+       <COLUMN>099</COLUMN>
        <LENGTH>013</LENGTH>
        <VISLENGTH>013</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4211,7 +4211,7 @@
        <NAME>GV_KUNNR</NAME>
        <TEXT>_______</TEXT>
        <LINE>003</LINE>
-       <COLUMN>110</COLUMN>
+       <COLUMN>113</COLUMN>
        <LENGTH>007</LENGTH>
        <VISLENGTH>007</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4228,7 +4228,7 @@
        <NAME>CREATEDBY</NAME>
        <TEXT>Created_By:</TEXT>
        <LINE>003</LINE>
-       <COLUMN>118</COLUMN>
+       <COLUMN>121</COLUMN>
        <LENGTH>011</LENGTH>
        <VISLENGTH>011</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4242,7 +4242,7 @@
        <NAME>GV_ERNAM</NAME>
        <TEXT>_________</TEXT>
        <LINE>003</LINE>
-       <COLUMN>130</COLUMN>
+       <COLUMN>133</COLUMN>
        <LENGTH>009</LENGTH>
        <VISLENGTH>009</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4257,7 +4257,7 @@
        <NAME>SALEAREA</NAME>
        <TEXT>Sale_area</TEXT>
        <LINE>003</LINE>
-       <COLUMN>140</COLUMN>
+       <COLUMN>143</COLUMN>
        <LENGTH>009</LENGTH>
        <VISLENGTH>009</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4271,7 +4271,7 @@
        <NAME>GV_SAREA</NAME>
        <TEXT>________</TEXT>
        <LINE>003</LINE>
-       <COLUMN>151</COLUMN>
+       <COLUMN>153</COLUMN>
        <LENGTH>008</LENGTH>
        <VISLENGTH>008</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4286,7 +4286,7 @@
        <NAME>BTN_SEARCH</NAME>
        <TEXT>Search</TEXT>
        <LINE>003</LINE>
-       <COLUMN>160</COLUMN>
+       <COLUMN>162</COLUMN>
        <LENGTH>006</LENGTH>
        <VISLENGTH>006</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4302,8 +4302,8 @@
        <TEXT>____________________________________________________________________________________________________________________________________</TEXT>
        <LINE>005</LINE>
        <COLUMN>001</COLUMN>
-       <LENGTH>166</LENGTH>
-       <VISLENGTH>166</VISLENGTH>
+       <LENGTH>169</LENGTH>
+       <VISLENGTH>169</VISLENGTH>
        <HEIGHT>003</HEIGHT>
        <FORMAT>CHAR</FORMAT>
        <REQU_ENTRY>N</REQU_ENTRY>
@@ -4394,12 +4394,12 @@
        <CONT_NAME>SCREEN</CONT_NAME>
        <TYPE>TEMPLATE</TYPE>
        <NAME>CB_DDSTA</NAME>
-       <TEXT>?_____________</TEXT>
+       <TEXT>?________</TEXT>
        <DROPDOWN>L</DROPDOWN>
        <LINE>006</LINE>
        <COLUMN>093</COLUMN>
-       <LENGTH>014</LENGTH>
-       <VISLENGTH>016</VISLENGTH>
+       <LENGTH>009</LENGTH>
+       <VISLENGTH>009</VISLENGTH>
        <HEIGHT>001</HEIGHT>
        <FORMAT>CHAR</FORMAT>
        <INPUT_FLD>X</INPUT_FLD>
@@ -4413,7 +4413,7 @@
        <NAME>BILLING_DOC_STATUS</NAME>
        <TEXT>Billing_Doc_Status:</TEXT>
        <LINE>006</LINE>
-       <COLUMN>111</COLUMN>
+       <COLUMN>104</COLUMN>
        <LENGTH>019</LENGTH>
        <VISLENGTH>019</VISLENGTH>
        <HEIGHT>001</HEIGHT>
@@ -4426,12 +4426,12 @@
        <CONT_NAME>SCREEN</CONT_NAME>
        <TYPE>TEMPLATE</TYPE>
        <NAME>CB_BDSTA</NAME>
-       <TEXT>?______________</TEXT>
+       <TEXT>?______</TEXT>
        <DROPDOWN>L</DROPDOWN>
        <LINE>006</LINE>
-       <COLUMN>132</COLUMN>
-       <LENGTH>015</LENGTH>
-       <VISLENGTH>017</VISLENGTH>
+       <COLUMN>124</COLUMN>
+       <LENGTH>007</LENGTH>
+       <VISLENGTH>007</VISLENGTH>
        <HEIGHT>001</HEIGHT>
        <FORMAT>CHAR</FORMAT>
        <INPUT_FLD>X</INPUT_FLD>
@@ -4446,8 +4446,8 @@
        <TEXT>____________________________________________________________________________________________________________________________________</TEXT>
        <LINE>008</LINE>
        <COLUMN>001</COLUMN>
-       <LENGTH>166</LENGTH>
-       <VISLENGTH>166</VISLENGTH>
+       <LENGTH>169</LENGTH>
+       <VISLENGTH>169</VISLENGTH>
        <HEIGHT>003</HEIGHT>
        <FORMAT>CHAR</FORMAT>
        <REQU_ENTRY>N</REQU_ENTRY>
@@ -5879,12 +5879,52 @@
       </RPY_DYFATC>
      </FIELDS>
     </item>
+    <item>
+     <HEADER>
+      <PROGRAM>ZSD4_MASS_PROC</PROGRAM>
+      <SCREEN>0900</SCREEN>
+      <LANGUAGE>E</LANGUAGE>
+      <DESCRIPT>Report Dashboard</DESCRIPT>
+      <TYPE>N</TYPE>
+      <NEXTSCREEN>0900</NEXTSCREEN>
+      <LINES>035</LINES>
+      <COLUMNS>181</COLUMNS>
+     </HEADER>
+     <CONTAINERS>
+      <RPY_DYCATT>
+       <TYPE>SCREEN</TYPE>
+       <NAME>SCREEN</NAME>
+      </RPY_DYCATT>
+      <RPY_DYCATT>
+       <TYPE>CUST_CTRL</TYPE>
+       <NAME>CC_DASHBOARD_0900</NAME>
+       <ELEMENT_OF>SCREEN</ELEMENT_OF>
+       <LINE>001</LINE>
+       <COLUMN>001</COLUMN>
+       <LENGTH>181</LENGTH>
+       <HEIGHT>035</HEIGHT>
+      </RPY_DYCATT>
+     </CONTAINERS>
+     <FIELDS>
+      <RPY_DYFATC>
+       <CONT_TYPE>SCREEN</CONT_TYPE>
+       <CONT_NAME>SCREEN</CONT_NAME>
+       <TYPE>OKCODE</TYPE>
+       <TEXT>____________________</TEXT>
+       <LENGTH>020</LENGTH>
+       <VISLENGTH>020</VISLENGTH>
+       <HEIGHT>001</HEIGHT>
+       <FORMAT>CHAR</FORMAT>
+       <INPUT_FLD>X</INPUT_FLD>
+      </RPY_DYFATC>
+     </FIELDS>
+    </item>
    </DYNPROS>
    <CUA>
     <ADM>
-     <ACTCODE>000014</ACTCODE>
+     <ACTCODE>000015</ACTCODE>
      <MENCODE>000003</MENCODE>
-     <PFKCODE>000015</PFKCODE>
+     <PFKCODE>000016</PFKCODE>
     </ADM>
     <STA>
      <RSMPE_STAT>
@@ -5991,6 +6031,14 @@
       <INT_NOTE>Fiter Search</INT_NOTE>
      </RSMPE_STAT>
      <RSMPE_STAT>
+      <CODE>ST0900</CODE>
+      <MODAL>D</MODAL>
+      <ACTCODE>000015</ACTCODE>
+      <PFKCODE>000016</PFKCODE>
+      <BUTCODE>0001</BUTCODE>
+      <INT_NOTE>Status for 0900</INT_NOTE>
+     </RSMPE_STAT>
+     <RSMPE_STAT>
       <CODE>ST_0200</CODE>
       <MODAL>D</MODAL>
       <ACTCODE>000011</ACTCODE>
@@ -6082,6 +6130,16 @@
       <INFO_TEXT>Create Sales Order</INFO_TEXT>
      </RSMPE_FUNT>
      <RSMPE_FUNT>
+      <CODE>DASHBOARD</CODE>
+      <TEXTNO>001</TEXTNO>
+      <TEXT_TYPE>S</TEXT_TYPE>
+      <TEXT_NAME>ICON_STATISTICS</TEXT_NAME>
+      <ICON_ID>@FG@</ICON_ID>
+      <FUN_TEXT>Dashboard Detail</FUN_TEXT>
+      <ICON_TEXT>Dashboard</ICON_TEXT>
+      <INFO_TEXT>Dashboard Detail</INFO_TEXT>
+     </RSMPE_FUNT>
+     <RSMPE_FUNT>
       <CODE>DELE</CODE>
       <TEXTNO>001</TEXTNO>
       <TEXT_TYPE>S</TEXT_TYPE>
@@ -6104,9 +6162,9 @@
       <TEXT_TYPE>S</TEXT_TYPE>
       <TEXT_NAME>ICON_EXPORT</TEXT_NAME>
       <ICON_ID>@49@</ICON_ID>
-      <FUN_TEXT>Dowload Template Mass Upload</FUN_TEXT>
-      <ICON_TEXT>Dowload Template Mass Upload</ICON_TEXT>
-      <INFO_TEXT>Dowload Template Mass Upload</INFO_TEXT>
+      <FUN_TEXT>Download Template Mass Upload</FUN_TEXT>
+      <ICON_TEXT>Download Template Mass Upload</ICON_TEXT>
+      <INFO_TEXT>Download Template Mass Upload</INFO_TEXT>
      </RSMPE_FUNT>
      <RSMPE_FUNT>
       <CODE>EXECUTE</CODE>
@@ -6524,6 +6582,12 @@
       <PFNO>07</PFNO>
      </RSMPE_BUT>
      <RSMPE_BUT>
+      <PFK_CODE>000010</PFK_CODE>
+      <CODE>0001</CODE>
+      <NO>03</NO>
+      <PFNO>08</PFNO>
+     </RSMPE_BUT>
+     <RSMPE_BUT>
       <PFK_CODE>000011</PFK_CODE>
       <CODE>0001</CODE>
       <NO>01</NO>
@@ -6572,6 +6636,12 @@
       <PFNO>05</PFNO>
      </RSMPE_BUT>
      <RSMPE_BUT>
+      <PFK_CODE>000013</PFK_CODE>
+      <CODE>0001</CODE>
+      <NO>03</NO>
+      <PFNO>08</PFNO>
+     </RSMPE_BUT>
+     <RSMPE_BUT>
       <PFK_CODE>000014</PFK_CODE>
       <CODE>0001</CODE>
       <NO>01</NO>
@@ -6593,7 +6663,13 @@
       <PFK_CODE>000015</PFK_CODE>
       <CODE>0001</CODE>
       <NO>02</NO>
-      <PFNO>02</PFNO>
+      <PFNO>18</PFNO>
+     </RSMPE_BUT>
+     <RSMPE_BUT>
+      <PFK_CODE>000016</PFK_CODE>
+      <CODE>0001</CODE>
+      <NO>01</NO>
+      <PFNO>05</PFNO>
      </RSMPE_BUT>
     </BUT>
     <PFK>
@@ -6911,6 +6987,12 @@
      </RSMPE_PFK>
      <RSMPE_PFK>
       <CODE>000010</CODE>
+      <PFNO>08</PFNO>
+      <FUNCODE>REFRESH</FUNCODE>
+      <FUNNO>001</FUNNO>
+     </RSMPE_PFK>
+     <RSMPE_PFK>
+      <CODE>000010</CODE>
       <PFNO>12</PFNO>
       <FUNCODE>CANCEL</FUNCODE>
       <FUNNO>001</FUNNO>
@@ -7025,6 +7107,12 @@
      </RSMPE_PFK>
      <RSMPE_PFK>
       <CODE>000013</CODE>
+      <PFNO>08</PFNO>
+      <FUNCODE>DASHBOARD</FUNCODE>
+      <FUNNO>001</FUNNO>
+     </RSMPE_PFK>
+     <RSMPE_PFK>
+      <CODE>000013</CODE>
       <PFNO>12</PFNO>
       <FUNCODE>CANCEL</FUNCODE>
       <FUNNO>001</FUNNO>
@@ -7049,12 +7137,6 @@
      </RSMPE_PFK>
      <RSMPE_PFK>
       <CODE>000015</CODE>
-      <PFNO>02</PFNO>
-      <FUNCODE>JOB_MON</FUNCODE>
-      <FUNNO>001</FUNNO>
-     </RSMPE_PFK>
-     <RSMPE_PFK>
-      <CODE>000015</CODE>
       <PFNO>03</PFNO>
       <FUNCODE>BACK</FUNCODE>
       <FUNNO>001</FUNNO>
@@ -7073,9 +7155,39 @@
      </RSMPE_PFK>
      <RSMPE_PFK>
       <CODE>000015</CODE>
+      <PFNO>18</PFNO>
+      <FUNCODE>JOB_MON</FUNCODE>
+      <FUNNO>001</FUNNO>
+     </RSMPE_PFK>
+     <RSMPE_PFK>
+      <CODE>000015</CODE>
       <PFNO>19</PFNO>
       <FUNCODE>SET_JOB</FUNCODE>
       <FUNNO>001</FUNNO>
+     </RSMPE_PFK>
+     <RSMPE_PFK>
+      <CODE>000016</CODE>
+      <PFNO>03</PFNO>
+      <FUNCODE>BACK</FUNCODE>
+      <FUNNO>001</FUNNO>
+     </RSMPE_PFK>
+     <RSMPE_PFK>
+      <CODE>000016</CODE>
+      <PFNO>05</PFNO>
+      <FUNCODE>REFRESH</FUNCODE>
+      <FUNNO>001</FUNNO>
+     </RSMPE_PFK>
+     <RSMPE_PFK>
+      <CODE>000016</CODE>
+      <PFNO>12</PFNO>
+      <FUNCODE>CANCEL</FUNCODE>
+      <FUNNO>001</FUNNO>
+     </RSMPE_PFK>
+     <RSMPE_PFK>
+      <CODE>000016</CODE>
+      <PFNO>15</PFNO>
+      <FUNCODE>EXIT</FUNCODE>
+      <FUNNO>002</FUNNO>
      </RSMPE_PFK>
     </PFK>
     <SET>
@@ -7158,6 +7270,10 @@
      <RSMPE_STAF>
       <STATUS>ST0102</STATUS>
       <FUNCTION>OVERVIEW</FUNCTION>
+     </RSMPE_STAF>
+     <RSMPE_STAF>
+      <STATUS>ST0102</STATUS>
+      <FUNCTION>REFRESH</FUNCTION>
      </RSMPE_STAF>
      <RSMPE_STAF>
       <STATUS>ST0110</STATUS>
@@ -7357,6 +7473,10 @@
      </RSMPE_STAF>
      <RSMPE_STAF>
       <STATUS>ST0800</STATUS>
+      <FUNCTION>DASHBOARD</FUNCTION>
+     </RSMPE_STAF>
+     <RSMPE_STAF>
+      <STATUS>ST0800</STATUS>
       <FUNCTION>EXIT</FUNCTION>
      </RSMPE_STAF>
      <RSMPE_STAF>
@@ -7374,6 +7494,22 @@
      <RSMPE_STAF>
       <STATUS>ST0802</STATUS>
       <FUNCTION>EXECUTE</FUNCTION>
+     </RSMPE_STAF>
+     <RSMPE_STAF>
+      <STATUS>ST0900</STATUS>
+      <FUNCTION>BACK</FUNCTION>
+     </RSMPE_STAF>
+     <RSMPE_STAF>
+      <STATUS>ST0900</STATUS>
+      <FUNCTION>CANCEL</FUNCTION>
+     </RSMPE_STAF>
+     <RSMPE_STAF>
+      <STATUS>ST0900</STATUS>
+      <FUNCTION>EXIT</FUNCTION>
+     </RSMPE_STAF>
+     <RSMPE_STAF>
+      <STATUS>ST0900</STATUS>
+      <FUNCTION>REFRESH</FUNCTION>
      </RSMPE_STAF>
      <RSMPE_STAF>
       <STATUS>ST_0200</STATUS>
@@ -7700,6 +7836,25 @@
       <MODAL>D</MODAL>
       <INT_NOTE>Main screen status</INT_NOTE>
      </RSMPE_ATRT>
+     <RSMPE_ATRT>
+      <OBJ_TYPE>A</OBJ_TYPE>
+      <OBJ_CODE>000015</OBJ_CODE>
+      <MODAL>D</MODAL>
+      <INT_NOTE>Status for 0900</INT_NOTE>
+     </RSMPE_ATRT>
+     <RSMPE_ATRT>
+      <OBJ_TYPE>P</OBJ_TYPE>
+      <OBJ_CODE>000016</OBJ_CODE>
+      <MODAL>D</MODAL>
+      <INT_NOTE>Status for 0900</INT_NOTE>
+     </RSMPE_ATRT>
+     <RSMPE_ATRT>
+      <OBJ_TYPE>B</OBJ_TYPE>
+      <OBJ_CODE>000016</OBJ_CODE>
+      <SUB_CODE>0001</SUB_CODE>
+      <MODAL>D</MODAL>
+      <INT_NOTE>Status for 0900</INT_NOTE>
+     </RSMPE_ATRT>
     </DOC>
     <TIT>
      <RSMPE_TITT>
@@ -7731,6 +7886,10 @@
       <TEXT>Mass Upload Sales Order</TEXT>
      </RSMPE_TITT>
      <RSMPE_TITT>
+      <CODE>T0500</CODE>
+      <TEXT>Tracking Sales Order</TEXT>
+     </RSMPE_TITT>
+     <RSMPE_TITT>
       <CODE>T0600</CODE>
       <TEXT>Report Monitoring</TEXT>
      </RSMPE_TITT>
@@ -7745,6 +7904,10 @@
      <RSMPE_TITT>
       <CODE>T0802</CODE>
       <TEXT>Search Criteria</TEXT>
+     </RSMPE_TITT>
+     <RSMPE_TITT>
+      <CODE>T0900</CODE>
+      <TEXT>Reporting Dashboard</TEXT>
      </RSMPE_TITT>
     </TIT>
    </CUA>

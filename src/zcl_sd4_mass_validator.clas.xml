@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_SD4_MASS_VALIDATOR</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>Mass Upload SO – Validation Engine</DESCRIPT>
+    <DESCRIPT>Mass Upload – Validation Engine</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
